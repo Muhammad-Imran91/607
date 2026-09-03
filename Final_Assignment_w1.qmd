@@ -1,0 +1,91 @@
+---
+title: "DATA 607 - Assignment 1: Student Performance Analysis"
+author: "Muhammad Imran"
+date: "`r Sys.Date()`"
+format:
+  html:
+    theme: cosmo
+    echo: false
+    toc: true
+---
+```{css, echo=FALSE}
+p, div {
+  text-align: justify;
+}
+
+---
+
+```{r}
+library(htmltools)
+
+
+a(
+  href = "https://archive.ics.uci.edu/dataset/320/student+performance", 
+  target = "_blank", 
+  "UCI Student Performance Dataset"
+)
+```
+
+# Introduction / Overview
+
+For this assignment, I selected the Student Performance dataset from the UCI Machine Learning Repository, a well-known public repository used for machine-learning and data-analysis research. The dataset is publicly available at the above link:
+
+The dataset was originally collected from two Portuguese secondary schools and was developed to study factors related to students' academic performance. The associated research article is *Using Data Mining to Predict Secondary School Student Performance* by Paulo Cortez and Alice Silva (2008).
+
+# What the dataset contains
+
+The Student Performance dataset contains information about students and their academic performance. It includes demographic information such as the student's age, gender, and school, as well as information about study habits, family background, previous academic failures, school absences, and grades.
+
+Some of the important variables include school, sex, age, studytime, failures, absences, G1, G2, and G3. The variables G1 and G2 represent grades from earlier periods, while G3 represents the student's final grade. For this project, I will use G3, renamed as final_grade, as the main target variable (shown in the table below). I will also transform coded values such as F and M into Female and Male and convert other abbreviated or coded variables into more meaningful descriptions (also shown in the table below).
+
+# Motivation for Selecting the Dataset
+
+I selected this dataset because it provides an interesting opportunity to apply data-science techniques to a real-world problem: understanding student academic performance. The dataset contains both numerical and categorical variables, which makes it appropriate for practicing data loading, cleaning, transformation, and exploratory analysis in R.
+
+I am also interested in this dataset because of my background in computer science and data science. Analyzing student performance provides an opportunity to use programming and statistical techniques to identify patterns in educational data. In future analysis, I would like to investigate whether factors such as study time, previous failures, absences, and earlier grades are associated with students' final grades. This makes the dataset useful not only for completing the current assignment but also for developing more advanced data-analysis and predictive-modeling skills later in the course.
+
+# Data Import and Transformation
+
+```{r transform-data}
+library(dplyr)
+library(readr)
+
+
+raw_url <- "https://raw.githubusercontent.com/Muhammad-Imran91/607/main/student-por.csv"
+
+
+student_data <- read_delim(raw_url, delim = ";", show_col_types = FALSE)
+
+
+transformed_df <- student_data %>%
+  select(
+    school, 
+    sex, 
+    age, 
+    absences, 
+    G3
+  ) %>%
+  rename(
+    school_code = school,
+    gender = sex,
+    total_absences = absences,
+    final_grade = G3
+  ) %>%
+  mutate(
+    school_code = ifelse(school_code == "GP", "Gabriel Pereira", "Mousinho da Silveira"),
+    gender = ifelse(gender == "F", "Female", "Male")
+  )
+
+
+print(head(transformed_df), width = Inf)
+```
+
+# Conclusion And Recommendation
+
+The study presented in the article is based on a relatively limited sample of students. Future research could expand the dataset by including a larger and more diverse group of students and then examine whether the identified performance indicators remain consistent across a broader population. Secondly, the article could be further strengthened by incorporating performance metrics and analyzing the correlations among the different variables. Such an analysis could provide deeper insights into the relationships between the factors influencing student performance and enhance the overall quality and validity of the research.
+
+In a nutshell, this activity has broadened my understanding of the research process and illuminated several potential areas for future investigation. These areas can serve as valuable points of focus for further research and analysis.
+
+------------------------------------------------------------------------
+
+------------------------------------------------------------------------
