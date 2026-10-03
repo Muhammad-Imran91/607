@@ -1,0 +1,356 @@
+---
+title: "IS 607 Assignment - Tidying and Transforming Data"
+author: "Muhammad Imran"
+date: "2026-10-03"
+output:
+  pdf_document: default
+  html_document: default
+---
+```{r setup, include=TRUE}
+knitr::opts_chunk$set(echo = TRUE, warning = FALSE, message = FALSE)
+library(tidyverse)
+library(knitr)
+library(scales)
+```
+
+# Step 1: Building the Raw CSV File
+As mentioned above, data rarely arrives neatly formatted. In order to practice t real-world data cleaning, I need to recreate the source table exactly as it appears in reality like messy cells, missing values, and all.
+
+* The Missing Airline Names: The original table doesn't repeat 'ALASKA' on the delayed row or 'AM WEST' on its delayed row. It leaves those cells blank because humans reading a printout visually group them. Software, however, will treat those empty cells as missing values (NA). I must keep them blank in your CSV so my code learns how to fix them.
+* The Empty Separator Row: Placing a completely empty row between ALASKA and AM WEST simulates untidy spreadsheet layouts where users add blank rows for visual spacing.
+* The Formatting: Notice numbers like "1,841" have commas. In raw files, commas turn numbers into text strings, which breaks calculations. I want to leave them in the CSV to handle string cleaning later.
+thereafter, the file is created it was stored at github, the link is as follows:
+
+https://github.com/Muhammad-Imran91/607/blob/main/data.csv
+
+The following code then, will upload this datafile direct from the github.
+
+
+
+```{r}
+# I have Used the direct raw GitHub URL
+data_url <- "https://raw.githubusercontent.com/Muhammad-Imran91/607/main/data.csv"
+
+raw_df <- read_csv(data_url, show_col_types = FALSE)
+
+# Standardize or rename first column if needed (e.g., if first column is named `...1` or `X1`)
+if (!"Airline" %in% colnames(raw_df)) {
+  raw_df <- raw_df %>% rename(Airline = 1)
+  
+}
+
+```
+
+# Step 2: Cleaning and Preparing the Data
+Before I can analyze anything, I have to bring the dataset into a structured format where every row represents an observation and every column represents a variable.
+* Dropping Empty Rows: Remove rows that contain no useful information. The blank row between airlines was put there for human eyes. Machines get confused by empty rows, so I drop any row where all columns are empty.
+* Filling Missing Airline Names (Down-Filling): Fill the empty airline cells with the correct airline name. Since row 2 belongs to ALASKA's delayed flights and row 5 belongs to AM WEST's delayed flights, I use a 'downward fill.' This looks at the cell above and copies 'ALASKA' down into row 2, and 'AM WEST' down into row 5.
+* Converting Text to Numbers: Turn formatted strings like "1,841" into actual numbers like 1841. I cannot perform mathematical operations on text. Removing commas and converting the flight counts into integers lets your code do math on them
+
+
+
+``` {r}
+kable(raw_df, caption = "Folloing is a Raw Untidy Input Data")
+
+cleaned_wide_df <- raw_df %>%
+  # Filter out completely empty rows
+  filter(!if_all(everything(), is.na)) %>%
+  # Fill missing Airline names downward
+  fill(Airline, .direction = "down") %>%
+  # Parse numeric columns formatted with commas
+  mutate(across(c(`Los Angeles`, Phoenix, `San Diego`, `San Francisco`, Seattle), 
+                ~ as.numeric(gsub(",", "", .))))
+
+kable(cleaned_wide_df, caption = "Following is a Cleaned Wide Data Structure")
+
+```
+
+# Step 3: Transforming Wide Data to Long Data
+* Unpivoting Cities (Gathering/Lengthening): Collapse the 5 city columns into a single column called 'City', with a second column called 'Count' holding the values. Instead of having five separate columns for cities, I stretch the data vertically. Now every individual flight count has its own row stating the Airline, Status, City, and Count.
+* Pivoting Flight Status (Widening Status): Split 'on time' and 'delayed' status into two distinct numeric columns side-by-side. Having 'on_time' and 'delayed' as two separate columns on the same row makes calculating performance rates straightforward. For every Airline + City pair, I can directly add them together to get total_flights.
+* Calculating Performance Metrics: Compute key performance ratios for each observation:
+
+* Total Flights = On-Time Flights + Delayed Flights
+* Delay Rate = Delayed Flights / Total Flights
+* On-Time Rate = On-Time Flights / Total Flights
+
+
+```{r}
+
+flights_long <- cleaned_wide_df %>%
+  pivot_longer(
+    cols = c(`Los Angeles`, Phoenix, `San Diego`, `San Francisco`, Seattle),
+    names_to = "City",
+    values_to = "Count"
+  ) %>%
+  pivot_wider(
+    names_from = Status,
+    values_from = Count
+  ) %>%
+  rename(
+    on_time = `on time`,
+    delayed = delayed
+  ) %>%
+  mutate(
+    total_flights = on_time + delayed,
+    delay_rate = delayed / total_flights,
+    on_time_rate = on_time / total_flights
+  )
+
+kable(flights_long, caption = "Tidied Long Data Format with Delay Rates")
+
+```
+
+# Step 4: Overall Airline Delay Analysis
+
+##  Detailed Breakdown
+* 1. Summing Aggregate Totals: ALASKA has 62 + 12 + 20 + 102 + 305 = 501 delayed flights out of 3,775 total flights. AM WEST has 117 + 415 + 65 + 129 + 61 = 787 delayed flights out of 7,225 total flights.
+* Calculating Overall Percentages: ALASKA Overall Delay Rate = 501 / 3,775 = 13.3%
+AM WEST Overall Delay Rate = 787 / 7,225 = 10.9%
+
+Looking purely at aggregate numbers across all destinations, AM WEST appears to be the better airline. It delays only 10.9% of its flights, whereas ALASKA delays 13.3%. If a customer asks I for a recommendation based purely on overall averages, I would be tempted to conclude that AM WEST is more reliable.
+
+
+```{r}
+overall_summary <- flights_long %>%
+  group_by(Airline) %>%
+  summarise(
+    total_on_time = sum(on_time),
+    total_delayed = sum(delayed),
+    total_flights = sum(total_flights),
+    overall_delay_rate = sum(delayed) / sum(total_flights),
+    overall_on_time_rate = sum(on_time) / sum(total_flights)
+  )
+
+kable(overall_summary, 
+      digits = 4, 
+      col.names = c("Airline", "On-Time Count", "Delayed Count", "Total Flights", "Overall Delay Rate", "Overall On-Time Rate"),
+      caption = "Below is an Overall Flight Performance Summary")
+```
+
+# Key Findings & Insights / Overall Performances
+##  Volume Comparison
+
+* AM WEST operates significantly larger flight operations, handling 7,225 total flights compared to ALASKA's 3,775 flights.
+
+* AM WEST accounts for ~65.7% of all combined flights in this dataset, while ALASKA accounts for ~34.3%.
+
+##  Punctuality & Delay Rates
+
+* AM WEST performed better overall in punctuality, achieving an 89.11% on-time rate and maintaining a lower overall delay rate (10.89%).
+
+* ALASKA recorded a higher delay rate at 13.27%, with an on-time rate of 86.73%.
+
+* Out of every 100 flights, ALASKA experiences roughly 2.4 more delayed flights than AM WEST on an aggregate basis.
+
+##  Combined Operations Baseline
+
+* Across both airlines combined, a total of 11,000 flights were recorded (9,712 on-time and 1,288 delayed).
+
+* The combined overall delay rate across all flights sits at 11.71%, giving an aggregate on-time reliability score of 88.29%.
+
+# Important Analytical Note (Simpson's Paradox)
+While AM WEST shows a lower aggregate delay rate overall (10.89% vs. 13.27%), this dataset is a classic example of Simpson's Paradox in data science:
+
+* AM WEST operates a massive majority of its flights out of Phoenix (a clear-weather hub with low baseline delay rates across all carriers).
+
+* ALASKA operates a higher proportion of its flights out of Seattle and San Francisco (airports prone to fog and poor weather delays).
+
+* When evaluated city-by-city, ALASKA actually achieves a lower delay rate than AM WEST in every single individual destination city. However, because AM WEST's flight volume is concentrated heavily in a sunny hub, its overall aggregate delay number appears superior.
+
+
+
+
+```{r}
+ggplot(overall_summary, aes(x = Airline, y = overall_delay_rate, fill = Airline)) +
+  geom_col(width = 0.5) +
+  scale_y_continuous(labels = percent_format(accuracy = 0.1)) +
+  labs(title = "Overall Delay Rate by Airline",
+       y = "Percentage of Delayed Flights",
+       x = "Airline") +
+  theme_minimal() +
+  geom_text(aes(label = percent(overall_delay_rate, accuracy = 0.1)), vjust = -0.5)
+
+```
+
+
+
+
+
+
+```{r}
+
+city_summary <- flights_long %>%
+  select(Airline, City, delayed, total_flights, delay_rate)
+
+kable(city_summary, 
+      digits = 4,
+      col.names = c("Airline", "City", "Delayed Count", "Total Flights", "Delay Rate"),
+      caption = "Delay Rate Breakdown by City")
+```
+# Key Insights & Analysis / performances city by city
+ALASKA Wins Across All 5 Cities
+* In San Francisco, AM WEST’s delay rate ($28.73\%$) is nearly 12 percentage points higher than ALASKA’s ($16.86\%$).   
+* In Seattle, AM WEST’s delay rate ($23.28\%$) is 9 percentage points higher than ALASKA’s ($14.21\%$).   
+* Across Los Angeles, Phoenix, and San Diego, ALASKA consistently stays $3\%$ to $6\%$ lower in delay rates compared to AM WEST. 
+
+##  Explaining the Simpson’s Paradox (Flight Volume Distribution)
+
+* AM WEST’s Volume Concentration: Out of AM WEST’s 7,225 total flights, 5,255 flights (72.7%) are routed to Phoenix—the city with the lowest delay rate for both airlines ($5.15\%$ and $7.90\%$). Because almost three-quarters of AM WEST's flights fly into a low-delay airport, its overall average delay rate is pulled down artificially.   
+* ALASKA’s Volume Concentration: Out of ALASKA’s 3,775 total flights, 2,751 flights (72.9%) are routed to Seattle ($2,146$) and San Francisco ($605$)—cities with high baseline delay rates due to weather and air traffic congestion. This heavy weighting in high-delay airports pulls ALASKA's overall aggregate average up. 
+
+
+```{r}
+ggplot(flights_long, aes(x = City, y = delay_rate, fill = Airline)) +
+  geom_col(position = "dodge") +
+  scale_y_continuous(labels = percent_format(accuracy = 0.1)) +
+  labs(title = "Delay Rate by Airline Across 5 Cities",
+       y = "Percentage of Delayed Flights",
+       x = "Destination City") +
+  theme_minimal() +
+  geom_text(aes(label = percent(delay_rate, accuracy = 0.1)), 
+            position = position_dodge(width = 0.9), vjust = -0.5, size = 3)
+```
+
+
+How can ALASKA be better in every single city, yet AM WEST appear better overall?
+
+##  Human Explanation of the Paradox
+
+This statistical phenomenon is known as Simpson's Paradox. It occurs when an underlying 'hidden variable', in this case, where each airline concentrates its flight volume; distorts the aggregated results.
+
+* Look at the Hub Destinations & Flight Distributions
+
+* AM WEST is centered in Phoenix:  AM WEST flew 5,255 out of its 7,225 total flights to Phoenix. That means over 72% of AM WEST's entire operation is concentrated in Phoenix. Phoenix happens to have exceptionally favorable weather and low delay rates for all airlines (~5% to 8% delays).
+
+* ALASKA is centered in Seattle & San Francisco:  ALASKA flew 2,146 out of its 3,775 total flights to Seattle and San Francisco. This represents 57% of ALASKA's entire operation. These airports suffer from heavy fog, severe weather delays, and high air traffic congestion (~14% to 28% delays across all carriers).
+
+##  Why the Overall Average Lies
+
+* Skewed Weights for AM WEST:  AM WEST's aggregate score is heavily skewed by Phoenix's easy flying conditions. Because 72% of its flights are in sunny Phoenix, its poor delay performance in cities like San Francisco (28.7%) gets drowned out in the total calculation.
+* Skewed Weights for ALASKA:  Even though ALASKA handles San Francisco and Seattle much better than AM WEST does, the massive volume of flights ALASKA operates in those difficult weather hubs pulls down its overall aggregate performance.
+
+
+
+```{r  echo=FALSE}
+library(officer)
+library(flextable)
+library(dplyr)
+
+# 1. Initialize Document
+doc <- read_docx()
+
+# Helper function to style flextables uniformly
+style_table <- function(df, align_right_start = 3) {
+  ft <- flextable(df) %>%
+    theme_vanilla() %>%
+    bg(part = "header", bg = "#1B365D") %>%
+    color(part = "header", color = "white") %>%
+    bold(part = "header") %>%
+    padding(padding = 4, part = "all") %>%
+    autofit()
+  
+  # Align right for numeric columns
+  if (align_right_start <= ncol(df)) {
+    ft <- align(ft, j = align_right_start:ncol(df), align = "right", part = "all")
+  }
+  
+  return(ft)
+}
+
+# -------------------------------------------------------------
+# Table 1: Raw Untidy Input Table
+# -------------------------------------------------------------
+raw_data <- data.frame(
+  Airline = c("ALASKA", "", "", "AM WEST", ""),
+  Status = c("on time", "delayed", "", "on time", "delayed"),
+  `Los Angeles` = c("497", "62", "", "694", "117"),
+  Phoenix = c("221", "12", "", "4,840", "415"),
+  `San Diego` = c("212", "20", "", "383", "65"),
+  `San Francisco` = c("503", "102", "", "320", "129"),
+  Seattle = c("1,841", "305", "", "201", "61"),
+  check.names = FALSE
+)
+
+# -------------------------------------------------------------
+# Table 2: Cleaned Wide Data Table
+# -------------------------------------------------------------
+cleaned_wide_data <- data.frame(
+  Airline = c("ALASKA", "ALASKA", "AM WEST", "AM WEST"),
+  Status = c("on time", "delayed", "on time", "delayed"),
+  `Los Angeles` = c(497, 62, 694, 117),
+  Phoenix = c(221, 12, 4840, 415),
+  `San Diego` = c(212, 20, 383, 65),
+  `San Francisco` = c(503, 102, 320, 129),
+  Seattle = c(1841, 305, 201, 61),
+  check.names = FALSE
+)
+
+# -------------------------------------------------------------
+# Table 3: Tidied Long Data Format
+# -------------------------------------------------------------
+long_data <- data.frame(
+  Airline = c(rep("ALASKA", 5), rep("AM WEST", 5)),
+  City = rep(c("Los Angeles", "Phoenix", "San Diego", "San Francisco", "Seattle"), 2),
+  `On-Time Count` = c(497, 221, 212, 503, 1841, 694, 4840, 383, 320, 201),
+  `Delayed Count` = c(62, 12, 20, 102, 305, 117, 415, 65, 129, 61),
+  `Total Flights` = c(559, 233, 232, 605, 2146, 811, 5255, 448, 449, 262),
+  `Delay Rate` = c("11.09%", "5.15%", "8.62%", "16.86%", "14.21%", 
+                  "14.43%", "7.90%", "14.51%", "28.73%", "23.28%"),
+  check.names = FALSE
+)
+
+# -------------------------------------------------------------
+# Table 4: Overall Flight Performance Summary
+# -------------------------------------------------------------
+overall_summary_data <- data.frame(
+  Airline = c("ALASKA", "AM WEST", "Total Combined"),
+  `On-Time Count` = c(3274, 6438, 9712),
+  `Delayed Count` = c(501, 787, 1288),
+  `Total Flights` = c(3775, 7225, 11000),
+  `Overall Delay Rate` = c("13.27%", "10.89%", "11.71%"),
+  `Overall On-Time Rate` = c("86.73%", "89.11%", "88.29%"),
+  check.names = FALSE
+)
+
+# -------------------------------------------------------------
+# Table 5: City-by-City Delay Comparison (Simpson's Paradox)
+# -------------------------------------------------------------
+city_data <- data.frame(
+  City = c("Los Angeles", "Phoenix", "San Diego", "San Francisco", "Seattle"),
+  `ALASKA Delay Rate` = c("11.09% (62/559)", "5.15% (12/233)", "8.62% (20/232)", "16.86% (102/605)", "14.21% (305/2146)"),
+  `AM WEST Delay Rate` = c("14.43% (117/811)", "7.90% (415/5255)", "14.51% (65/448)", "28.73% (129/449)", "23.28% (61/262)"),
+  `Better Performer` = c("ALASKA (+3.34%)", "ALASKA (+2.75%)", "ALASKA (+5.89%)", "ALASKA (+11.87%)", "ALASKA (+9.07%)"),
+  check.names = FALSE
+)
+
+# -------------------------------------------------------------
+# Add Content to Word Document
+# -------------------------------------------------------------
+
+doc <- doc %>%
+  body_add_par("IS 607: Complete Data Tables Collection", style = "heading 1") %>%
+  
+  body_add_par("1. Raw Untidy Data Table (Source Input)", style = "heading 2") %>%
+  body_add_flextable(style_table(raw_data, align_right_start = 3)) %>%
+  body_add_par("", style = "Normal") %>%
+  
+  body_add_par("2. Cleaned Wide Data Table (Implicit NA Filled)", style = "heading 2") %>%
+  body_add_flextable(style_table(cleaned_wide_data, align_right_start = 3)) %>%
+  body_add_par("", style = "Normal") %>%
+  
+  body_add_par("3. Tidied Long Data Format (With Delay Rates)", style = "heading 2") %>%
+  body_add_flextable(style_table(long_data, align_right_start = 3)) %>%
+  body_add_par("", style = "Normal") %>%
+  
+  body_add_par("4. Overall Flight Performance Summary Table", style = "heading 2") %>%
+  body_add_flextable(style_table(overall_summary_data, align_right_start = 2)) %>%
+  body_add_par("", style = "Normal") %>%
+  
+  body_add_par("5. City-by-City Delay Comparison Table", style = "heading 2") %>%
+  body_add_flextable(style_table(city_data, align_right_start = 2))
+
+# Save Document
+print(doc, target = "All_Assignment_Tables_R.docx")
+cat("Word document successfully saved as 'All_Assignment_Tables_R.docx'!\n")
+```
