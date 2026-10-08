@@ -1,0 +1,718 @@
+---
+title: "Project 2 — Data Tidying"
+author: "Muhammad Imran"
+date: today
+format:
+  html:
+    toc: true
+    code-fold: true
+    theme: flatly
+execute:
+  echo: false
+  warning: false
+  message: false
+---
+
+```{r setup}
+# Load required core packages
+library(tidyverse)
+library(knitr)
+library(ggplot2)
+library(janitor)
+
+# Global reproducibility seed
+set.seed(42)
+
+# Ensure data directory exists
+if (!dir.exists("data")) {
+  dir.create("data")
+}
+```
+
+------------------------------------------------------------------------
+
+# Executive Overview
+
+This Quarto documents / approach document is the end-to-end data transformation pipeline required to import untidy ("wide") datasets across four domains (it was three mandatory), convert them into a normalized ("tidy") data model using tidyr and dplyr, and analyze the transformed datasets.
+
+## Dataset 1: Health Care Expenditure (Text Data)
+
+### 1. Data Source & Import from GitHub
+
+1.  At the very first instance I copy the data from some blog on the internet page and paste into the Health_care_exp.txt file. Thereafter, this .txt file is uploaded at the github. This dataset is a synthetic wide format benchmark dataset designed specifically for data transformation, tidying, and reshaping practice.
+
+2.  The next step id to download and read the raw text file line by line, directly into a data frame, where most of the raw data uses comma, tab or pipe delimiters.
+
+3.  The data is then Clean and inspect the imported data structure where fully empty rows removed if any.
+
+4.  The next step is to define destination file path on my local computer, by default, this saves to your current R working directory of my computer.
+
+5.  and finally write the Health_care_Exp1.csv in to the current R working Directory
+
+    ```{r convert_txt_to_csv}
+    library(tidyverse)
+    library(knitr)
+
+    # 1. Direct RAW GitHub URL for the text file
+    github_txt_url <- "https://github.com/Muhammad-Imran91/607/blob/main/Health_care_exp.txt"
+
+    # 2. Read and clean raw text data
+    raw_text_data <- read_tsv(github_txt_url, show_col_types = FALSE)
+
+    clean_data <- raw_text_data %>%
+      filter(if_any(everything(), ~ !is.na(.) & . != ""))
+
+    # 3. Save directly to the current working directory
+    output_file_path <- file.path(getwd(), "Health_care_Exp1.csv")
+    write_csv(clean_data, output_file_path)
+
+    # Confirmation message
+    cat("Successfully processed and saved file to:", output_file_path, "\n")
+    ```
+
+### 2.Uploading the .csv file into github and getting directly in R
+
+- In this step, I uploaded the Health_care_Exp1.csv file in to the github
+
+- Secondly, read wide dataset with exact column names preserved
+
+```{r load-data_1}
+csv_url <- "https://raw.githubusercontent.com/Muhammad-Imran91/607/main/Health_care_exp1.csv"
+
+# Read wide dataset into raw_data directly from the URL (or use local output_file_path)
+raw_data <- read.csv(csv_url, check.names = FALSE)
+
+```
+
+### 3. Data Structural Inspection Before Tidying
+
+**nrow(raw_data) & ncol(raw_data)**: These functions calculate the total number of rows (observations) and columns (variables) present in the raw_data data frame.
+
+**cat(...):** Concatenates and prints formatted text directly to the output console or rendered document.
+
+**"\\n\\n"**: Adds two line breaks after the printed string to create visual spacing before the next output.
+
+It will furnish an immediate snapshot of the dataset size (e.g., Dataset Dimensions — Rows: 04 \| Columns: 06).
+
+```{r}
+cat("Dataset Dimensions — Rows:", nrow(raw_data), "| Columns:", ncol(raw_data), "\n\n")
+
+# Display representative wide sample
+kable(raw_data, caption = "Raw Untidy (Wide) Data fetched from GitHub")
+```
+
+### 4. Data Transformation Pipeline
+
+There are 04 stages of my data transformation pipeline
+
+#### 1. Data Ingestion
+
+- Fetching raw text or CSV files directly from GitHub (read_tsv / read.csv).
+
+#### 2. Data Cleansing & Normalization
+
+Fixing structural issues, stripping unwanted characters, fixing data types, and standardizing naming conventions.
+
+- Removing \$, ,, and % symbols using regular expressions (gsub("\[\$,%\]", "", expenditure_raw)).
+
+- Converting text strings to proper numeric types (as.numeric(), as.integer()).
+
+- Filtering out missing or empty rows (drop_na()).
+
+- Standardizing column headers to snake_case using janitor::clean_names().
+
+#### 3. Data Reshaping (Tidying)
+
+Reorganizing data layout to follow Tidy Data principles:
+
+- Each variable forms a column.
+
+- Each observation forms a row.
+
+- Each cell contains a single value.
+
+Converting wide year columns (2018, 2019, 2020...) into long key-value rows (year and expenditure) using pivot_longer().
+
+#### 4. Aggregation & Output Formatting
+
+- Grouping by categories (group_by()), computing summary statistics (mean(), min(), max()), and outputting styled tables (kable()) and charts (ggplot2).
+
+```{r tidy-data_1}
+library(janitor)
+
+tidy_data <- raw_data %>%
+  # 1. Clean and normalize raw column names to standard snake_case first
+  clean_names() %>%
+  
+  # 2. Reshape wide year columns into key-value pairs (rows)
+  # Adjust the column range matches your year range (e.g., starts_with("x") if read.csv added 'x')
+  pivot_longer(
+    cols = matches("^x?\\d{4}$"),
+    names_to = "year",
+    values_to = "expenditure_raw"
+  ) %>%
+  
+  # 3. Clean year, remove symbols ($, %, commas), and convert numeric types
+  mutate(
+    year = as.integer(str_extract(year, "\\d{4}")),
+    expenditure = as.numeric(gsub("[$,%]", "", expenditure_raw)),
+    across(where(is.character), str_trim)
+  ) %>%
+  
+  # 4. Filter out missing or non-informative records
+  drop_na(expenditure)
+
+# Display first 10 rows of the tidied healthcare dataset
+kable(head(tidy_data, 10), caption = "Tidy Healthcare Expenditure Dataset")
+```
+
+### 5. Analytical Methods
+
+Data processing and exploratory analysis were conducted using R (tidyverse, janitor, and knitr). The workflow comprised three main phases:
+
+1.  **Data Ingestion and Cleansing:** Raw data was ingested directly from GitHub. Non-informative empty rows and missing records were filtered out. Currency symbols (\$), commas, and percentages were programmatically stripped using regular expressions to convert quantitative fields into clean numeric formats (double).
+
+2.  **Data Reshaping (Tidying):** The raw dataset exhibited an untidy, wide-column structure where individual years spanned across multiple columns. Using pivot_longer(), time-series variables were consolidated into a normalized key-value format (year and expenditure), adhering to tidy data principles where each variable forms a column and each observation forms a row.
+
+3.  **Normalization and Aggregation:** Variable names were standardized into snake_case using clean_names(). Summary statistics—including mean, minimum, maximum, and net expenditure changes—were computed across categories and time frames to quantify growth trends.
+
+```{r healthcare-visualization, fig.width=9, fig.height=5}
+# Adjust group / color / facet variables based on your dataset columns 
+# (e.g., country, state, category, or measure)
+group_var <- names(tidy_data)[1]  # dynamically picks your first categorical variable
+
+ggplot(tidy_data, aes(x = year, y = expenditure, color = .data[[group_var]], group = .data[[group_var]])) +
+  geom_line(linewidth = 1.2) +
+  geom_point(size = 3) +
+  # Use currency formatting if expenditure is in USD ($), otherwise use comma_format()
+  scale_y_continuous(labels = scales::dollar_format()) +
+  scale_x_continuous(breaks = unique(tidy_data$year)) +
+  labs(
+    title = "Healthcare Expenditure Trends Over Time",
+    subtitle = "Tracking changes in healthcare spending across categories",
+    x = "Year",
+    y = "Healthcare Expenditure ($)",
+    color = stringr::str_to_title(gsub("_", " ", group_var))
+  ) +
+  theme_minimal(base_size = 12) +
+  theme(
+    legend.position = "bottom",
+    panel.grid.minor = element_blank(),
+    plot.title = element_text(face = "bold")
+  )
+
+```
+
+### 6. Visualization of the output
+
+The visualization highlights key structural patterns in healthcare spending across the evaluated timeframe:
+
+- **Trajectory & Trend:** Healthcare expenditure demonstrates an overall upward trend over time, reflecting increasing operational, administrative, and clinical costs.
+- **Category Variance:** A noticeable divergence exists among spending categories/groups. Higher-tier spending brackets maintain a consistently elevated baseline compared to lower-tier expenditures, showing minimal crossover over the evaluated years.
+- **Growth Velocity:** Year-over-year increases show steady growth rather than sudden spikes, indicating sustained systemic demand rather than localized anomalies.
+
+### 7. Analysis / Interpretation of results in context
+
+#### Highest Overall Expenditure: Aging Population (High Burden / High Income):
+
+- Holds the highest average expenditure (**11.88**) and peak spending (**12.9**).
+
+- Saw the greatest growth over time with a `total_change` of **1.3**.
+
+- *Takeaway:* High healthcare burden paired with high income resources correlates directly with maximum total spending and the fastest cost growth.
+
+#### Moderate Expenditure: Working Population (Moderate Burden / High Income):
+
+- Maintains an average expenditure of **7.12** (ranging from **6.5** to **7.8**) with a growth of **0.7**.
+
+- *Takeaway:* Strong financial access enables high expenditure, but moderate health burden keeps overall spending substantially lower than the aging tier.
+
+#### Significant Growth in Middle Income: Aging Population (High Burden / Middle Income):
+
+- Holds an average spending of **5.80** (ranging from **5.2** to **6.3**).
+
+- Recorded the second-highest growth with a `total_change` of **1.1**.
+
+- *Takeaway:* High healthcare burden drives significant spending increases over time even within middle-income brackets.
+
+#### Lowest Spending & Growth: Youth Population (Low Burden / Low Income):
+
+- Represents the lowest spending tier across all metrics: mean (**3.42**), min (**3.1**), max (**3.7**), and growth (**0.6**).
+
+- *Takeaway:* Lower medical burden combined with financial constraints yields the lowest overall healthcare expenditure.
+
+```{r summary-table-healthcare}
+# Summary Statistics by Healthcare Group/Category
+group_var <- names(tidy_data)[1] # Dynamically picks your first categorical variable
+
+summary_stats <- tidy_data %>%
+  group_by(.data[[group_var]]) %>%
+  summarise(
+    mean_expenditure = mean(expenditure, na.rm = TRUE),
+    min_expenditure  = min(expenditure, na.rm = TRUE),
+    max_expenditure  = max(expenditure, na.rm = TRUE),
+    total_change     = last(expenditure) - first(expenditure),
+    .groups = "drop"
+  ) %>%
+  arrange(desc(mean_expenditure)) %>%
+  clean_names()
+
+kable(
+  summary_stats,
+  digits = 2,
+  caption = "Summary Metrics of Healthcare Expenditure Over Time"
+)
+```
+
+### 8. Conclusion
+
+This part of the Quarto document details an end-to-end R pipeline that ingests an untidy, wide-format healthcare expenditure dataset from GitHub, cleans raw text formatting, and reshapes it into a normalized long model using `tidyr`, `dplyr`, and `janitor`. Quantitative values are parsed via regex and column names are standardized to `snake_case` before calculating metrics and generating `ggplot2` visualizations. The resulting analysis shows that healthcare expenditure trends are strongly driven by demographic burden and income level, with the **Aging Population (High Burden / High Income)** group demonstrating both the highest average spending and the greatest cost expansion, while the **Youth Population (Low Burden / Low Income)** group maintains the lowest spending baseline and slowest growth.
+
+```{r}
+# Visual Separator
+cat("\n", rep("-", 80), "\n\n", sep = "")
+```
+
+## Dataset 2: E-Commerce growth
+
+### 1. Data Source & Import from GitHub
+
+To begin the data pipeline, a synthetic wide-format benchmark dataset was constructed from web-sourced e-commerce content and saved as `ecommerce_growth.txt` before being uploaded to GitHub for centralized hosting. The raw file was then imported directly into R as a structured data frame using delimiter handling to accommodate tab, comma, or pipe separators. Following ingestion, the raw structure underwent initial cleaning to inspect its dimensions and remove any fully blank or empty rows. Finally, a local destination file path was established targeting the active R working directory, and the cleaned data frame was exported and saved locally as `ecommerce_growth.csv` for downstream transformation and tidying.
+
+```{r}
+library(tidyverse)
+
+# 1. Direct RAW GitHub URL for the text file
+github_raw_url <- "https://github.com/Muhammad-Imran91/607/blob/main/ecommerce_growth.txt"
+
+# 2. Download and read the raw text file line-by-line or directly into a dataframe
+# Note: Most GitHub raw text files use tab, comma, or pipe delimiters.
+raw_text_data <- read.delim(github_raw_url, stringsAsFactors = FALSE, row.names = NULL)
+
+# 3. Clean and inspect the imported data structure
+clean_data <- raw_text_data %>%
+  # Remove fully empty rows if any exist
+  filter(if_any(everything(), ~ !is.na(.) & . != ""))
+
+# 4. Define destination file path on your local computer
+# By default, this saves to your current R working directory.
+output_file_path <- "E-commerce_growth.csv"
+
+# 5. Write and save the data frame to a CSV file on your local disk
+write.csv(clean_data, file = output_file_path, row.names = FALSE)
+
+# Confirmation message
+cat("Successfully processed and saved file to:", normalizePath(output_file_path), "\n")
+```
+
+### 2.Uploading the .csv file into github and getting directly in R
+
+In this step, I uploaded the E-commerce_growth.csv file from the github and read wide dataset with exact column names preserved
+
+### 3. Data Structural Inspection Before Tidying
+
+To summarize dataset structure and dimensions, the `nrow(raw_data)` and `ncol(raw_data)` functions are utilized to extract the total count of observations and variables present within the imported data frame. These structural metrics are then formatted and output to the console using the `cat()` function, which incorporates `\n\n` line breaks to ensure clean visual separation from subsequent output. Executing this step provides an immediate, high-level snapshot of the raw dataset's size (for instance, *Dataset Dimensions — Rows: 04 \| Columns: 06*), allowing for quick verification of the data ingestion process before initiating further tidying.
+
+```{r load-data_e-commerce}
+# 1. Use the true RAW GitHub URL (raw.githubusercontent.com)
+github_raw_url <- "https://raw.githubusercontent.com/Muhammad-Imran91/607/main/ecommerce_growth.csv"
+
+# 2. Read the CSV directly into R
+raw_data <- read.csv(
+  github_raw_url, 
+  check.names = FALSE, 
+  stringsAsFactors = FALSE
+)
+
+# 3. Clean fully empty rows if present
+clean_data <- raw_data %>%
+  filter(if_any(everything(), ~ !is.na(.) & . != ""))
+
+# 4. Save to local CSV
+output_file_path <- "E-commerce_growth.csv"
+write.csv(clean_data, file = output_file_path, row.names = FALSE)
+
+cat("Dataset Dimensions — Rows:", nrow(clean_data), "| Columns:", ncol(clean_data), "\n\n")
+
+# 5. Display representative sample
+knitr::kable(clean_data, caption = "Raw Untidy (Wide) Data fetched from GitHub")
+```
+
+### 4. Data Transformation Pipeline
+
+There are 04 stages of my data transformation pipeline
+
+#### 1. Data Ingestion
+
+Fetching raw text or CSV files directly from GitHub (read_tsv / read.csv).
+
+#### 2. Data Cleansing & Normalization
+
+- Fixing structural issues, stripping unwanted characters, fixing data types, and standardizing naming conventions.
+
+- Removing \$, ,, and % symbols using regular expressions (gsub("\[\$,%\]", "", expenditure_raw)).
+
+- Converting text strings to proper numeric types (as.numeric(), as.integer()).
+
+- Filtering out missing or empty rows (drop_na()).
+
+- Standardizing column headers to snake_case using janitor::clean_names().
+
+#### 3. Data Reshaping (Tidying)
+
+Reorganizing data layout to follow Tidy Data principles:
+
+- Each variable forms a column.
+
+- Each observation forms a row.
+
+- Each cell contains a single value.
+
+Converting wide year columns (2018, 2019, 2020...) into long key-value rows (year and expenditure) using pivot_longer().
+
+#### 4. Aggregation & Output Formatting
+
+Grouping by categories (group_by()), computing summary statistics (mean(), min(), max()), and outputting styled tables (kable()) and charts (ggplot2)
+
+```{r tidy-data-ecommerce}
+tidy_data <- raw_data %>%
+  # Reshape wide year columns into rows
+  pivot_longer(
+    cols = matches("^x?\\d{4}$") | matches("2018|2019|2020|2021|2022"),
+    names_to = "year",
+    values_to = "growth_raw"
+  ) %>%
+  # Extract year integer (handles auto-prefixed column names like 'X2018' or '2018')
+  # Clean percent/currency values directly into numeric format
+  mutate(
+    year = as.integer(str_extract(year, "\\d{4}")),
+    growth_rate_pct = parse_number(as.character(growth_raw)),
+    across(where(is.character), str_trim)
+  ) %>%
+  # Drop raw unparsed column and filter NAs
+  select(-growth_raw) %>%
+  drop_na(growth_rate_pct) %>%
+  # Standardize all column names to snake_case
+  janitor::clean_names()
+
+# Display the dataset with normalized variable names
+kable(head(tidy_data, 10), caption = "Tidy Dataset with Normalized Variable Names (snake_case)")
+```
+
+The below line plot displays the annual growth rate trajectory (%) for four distinct e-commerce retail sectors across a five-year period from 2018 to 2022.
+
+### 5. Analytical Methods
+
+Data processing and exploratory analysis were conducted using R (tidyverse, janitor, and knitr). The workflow comprised three main phases:
+
+**Data Ingestion and Cleansing**: Raw data was ingested directly from GitHub. Non-informative empty rows and missing records were filtered out. Currency symbols (\$), commas, and percentages were programmatically stripped using regular expressions to convert quantitative fields into clean numeric formats (double).
+
+**Data Reshaping (Tidying):** The raw dataset exhibited an untidy, wide-column structure where individual years spanned across multiple columns. Using pivot_longer(), time-series variables were consolidated into a normalized key-value format (year and expenditure), adhering to tidy data principles where each variable forms a column and each observation forms a row.
+
+**Normalization and Aggregation:** Variable names were standardized into snake_case using clean_names(). Summary statistics—including mean, minimum, maximum, and net expenditure changes—were computed across categories and time frames to quantify growth trends.
+
+### 6. Visualization of the output
+
+1.  **Overall Upward Trajectory Across All Sectors**
+
+    Every retail sector experienced positive net growth over the 5-year period.
+
+    - There is a noticeable acceleration/steeper slope between 2019 and 2020 across all categories, likely reflecting the e-commerce surge driven by global COVID-19 pandemic demand.
+
+    - Post-2020 (2020–2022), growth rates continued to rise, but at a more gradual, stabilized pace.
+
+2.  **Sector Performance Hierarchy**
+
+    - Consumer Electronics (High Demand / Mature) *(Green Line)*: Maintains the highest growth rate throughout the entire timeline, starting around 21.5% in 2018 and expanding to over 31% by 2022.
+
+    - Apparel & Fashion (High Demand / Emerging) *(Coral/Red Line)*: Holds the second-highest trajectory, growing steadily from roughly 14% in 2018 to 24% in 2022.
+
+    - Home & Living (or mid-tier sector) *(Purple Line)*: Ranks third, expanding from 10% in 2018 to approximately 16% in 2022.
+
+    - Grocery & Food (Low Demand / Emerging) *(Teal Line)*: Recorded the lowest growth rates overall, starting at \~3% in 2018, making a sharp jump to \~8% in 2020, and finishing near 10% in 2022.
+
+```{r visualization-ecommerce, fig.width=9, fig.height=5}
+# Identify the first non-numeric/character column to use as the grouping/color variable
+group_var <- names(tidy_data %>% select(where(~ is.character(.) || is.factor(.))))[1]
+
+# 1. Trend Analysis Plot across E-Commerce Segments
+ggplot(tidy_data, aes(x = year, y = growth_rate_pct, color = .data[[group_var]], group = .data[[group_var]])) +
+  geom_line(linewidth = 1.2) +
+  geom_point(size = 3) +
+  scale_y_continuous(labels = scales::percent_format(scale = 1)) +
+  scale_x_continuous(breaks = min(tidy_data$year, na.rm = TRUE):max(tidy_data$year, na.rm = TRUE)) +
+  labs(
+    title = "Trajectory of E-Commerce Growth",
+    subtitle = paste("Comparing growth trends across", group_var),
+    x = "Year",
+    y = "Growth Rate (%)",
+    color = str_to_title(str_replace_all(group_var, "_", " "))
+  ) +
+  theme_minimal(base_size = 12) +
+  theme(
+    legend.position = "bottom",
+    panel.grid.minor = element_blank(),
+    plot.title = element_text(face = "bold")
+  )
+```
+
+### 7. Analysis/ Interpretation of results in context
+
+- **Performance Hierarchy**: Market performance aligns directly with consumer demand tiers. **Consumer Electronics** (*High Demand / Mature*) leads with the highest average growth rate (**26.64%**) and peak performance (**31.2%**), followed by **Apparel & Fashion** (*High Demand / Emerging*) at **19.50%**. **Home & Furniture** (*Moderate Demand / Mature*) occupies the mid-tier at **13.08%**, while **Grocery & Food** (*Low Demand / Emerging*) records the lowest overall average at **6.52%**.
+
+- **Structural Volatility & Dispersion**: Metric spreads ($\text{max\_value} - \text{min\_value}$) reveal a distinct divergence in growth elasticity:
+
+  - **High-Expansion Sectors**: High-demand categories experienced broader growth swings ($\approx 9.8 - 9.9$ percentage points), reflecting greater sensitivity to macroeconomic online adoption surges.
+
+  - **Stable Sectors**: Lower-demand and mature categories exhibited tighter growth ranges ($\approx 6.2 - 6.4$ percentage points), pointing to stable, incremental trajectory shifts rather than sharp expansion spikes.
+
+```{r summary-table-ecomerce}
+# 1. Dynamically identify non-numeric (grouping) and numeric (value) columns
+group_vars  <- names(tidy_data %>% select(where(~ is.character(.) || is.factor(.))))
+num_var     <- names(tidy_data %>% select(where(is.numeric)) %>% select(-any_of("year")))[1]
+
+# 2. Performance Summary Table
+summary_stats <- tidy_data %>%
+  group_by(across(all_of(group_vars))) %>%
+  summarise(
+    mean_value   = mean(.data[[num_var]], na.rm = TRUE),
+    min_value    = min(.data[[num_var]], na.rm = TRUE),
+    max_value    = max(.data[[num_var]], na.rm = TRUE),
+    total_spread = max(.data[[num_var]], na.rm = TRUE) - min(.data[[num_var]], na.rm = TRUE),
+    .groups      = "drop"
+  ) %>%
+  arrange(desc(mean_value)) %>%
+  janitor::clean_names()
+
+# 3. Render Table
+kable(
+  summary_stats,
+  digits = 2,
+  caption = "Normalized Performance Summary Metrics"
+)
+```
+
+### 8. Conclusion
+
+An analysis of e-commerce growth data (2018–2022) processed through R (`tidyverse`) reveals sustained positive growth across all four evaluated sectors, characterized by a sharp pandemic-driven acceleration in 2020 followed by steady post-2020 stabilization. High-demand categories led overall market performance and exhibited greater growth elasticity, with Consumer Electronics holding the highest average growth rate (26.64%, peaking at 31.2%) followed by Apparel & Fashion (19.50%), while Home & Furniture (13.08%) occupied the mid-tier and Grocery & Food (6.52%) maintained a more stable, incremental trajectory.
+
+```{r}
+
+# Visual Separator
+cat("\n", rep("-", 80), "\n\n", sep = "")
+
+
+```
+
+## Dataset 3: Renewable Energy Grid Share
+
+### 1. Data Source & Import from GitHub
+
+1.  At the very first instance I copy the data from some blog on the internet page and paste into the renewable_energy_Share.txt file. Thereafter, this .txt file is uploaded at the github. This dataset is a synthetic wide format benchmark dataset designed specifically for data transformation, tidying, and reshaping practice.
+
+2.  The next step id to download and read the raw text file line by line, directly into a data frame, where most of the raw data uses comma, tab or pipe delimiters.
+
+3.  The data is then Clean and inspect the imported data structure where fully empty rows removed if any.
+
+4.  The next step is to define destination file path on my local computer, by default, this saves to your current R working directory of my computer.
+
+5.  and finally write the renewable_energy_share.csv in to the current R working Directory.
+
+```{r}
+library(tidyverse)
+
+# 1. Direct RAW GitHub URL for the text file
+github_raw_url <- "https://github.com/Muhammad-Imran91/607/blob/main/Renewable%20Energy%20Share.txt"
+
+# 2. Download and read the raw text file line-by-line or directly into a dataframe
+# Note: Most GitHub raw text files use tab, comma, or pipe delimiters.
+raw_text_data <- read.delim(github_raw_url, stringsAsFactors = FALSE, row.names = NULL)
+
+# 3. Clean and inspect the imported data structure
+clean_data <- raw_text_data %>%
+  # Remove fully empty rows if any exist
+  filter(if_any(everything(), ~ !is.na(.) & . != ""))
+
+# 4. Define destination file path on your local computer
+# By default, this saves to your current R working directory.
+output_file_path <- "renewable_energy_Share.csv"
+
+# 5. Write and save the data frame to a CSV file on your local disk
+write.csv(clean_data, file = output_file_path, row.names = FALSE)
+
+# Confirmation message
+cat("Successfully processed and saved file to:", normalizePath(output_file_path), "\n")
+```
+
+### 2.Uploading the .csv file into github and getting directly in R
+
+1.  In this step, I uploaded the renewable_energy_Share.csv file in to the github
+
+2.  Secondly, read wide dataset with exact column names preserved
+
+```{r load-data}
+# Direct RAW URL for GitHub CSV files
+github_raw_url <- "https://raw.githubusercontent.com/Muhammad-Imran91/607/main/renewable%20energy%20share.csv"
+
+# Read wide dataset with exact column names preserved
+raw_data <- read.csv(github_raw_url, check.names = FALSE)
+
+```
+
+### 3. Data Structural Inspection Before Tidying
+
+1.  **nrow(raw_data) & ncol(raw_data):** These functions calculate the total number of rows (observations) and columns (variables) present in the raw_data data frame.
+
+2.  **cat(...):** Concatenates and prints formatted text directly to the output console or rendered document.
+
+3.  **"\\n\\n"**: Adds two line breaks after the printed string to create visual spacing before the next output.
+
+4.  It will furnish an immediate snapshot of the dataset size (e.g., Dataset Dimensions — Rows: 10 \| Columns: 6).
+
+```{r}
+cat("Dataset Dimensions — Rows:", nrow(raw_data), "| Columns:", ncol(raw_data), "\n\n")
+
+# Display representative wide sample
+kable(raw_data, caption = "Raw Untidy (Wide) Data fetched from GitHub")
+```
+
+### 4. Data Transformation Pipeline
+
+I perform the standard `tidyr` / `dplyr` tidying pipeline:
+
+1.  **Pivoting:** Convert year columns (`2018`–`2022`) to long format.
+
+2.  **Entity Normalization:** Split combined `Grid Region / Scale Level` into distinct attributes.
+
+3.  **Cleaning:** Strip percentage signs (`%`) and convert strings to numeric floating points.
+
+**Key Changes Made:**
+
+**Removed row.names** = NULL (no longer needed once reading true CSV data)
+
+**Variable Normalization**: Added janitor::clean_names() to convert all variable names into clean snake_case (e.g., grid_region, operation_scale, renewable_share_pct, mean_share, absolute_growth).
+
+**Table Output:** Added kable() display right after name normalization to inspect the clean snake_case variable structure.
+
+```{r tidy-data}
+tidy_data <- raw_data %>%
+  # Reshape wide year columns into rows
+  pivot_longer(
+    cols = `2018`:`2022`,
+    names_to = "year",
+    values_to = "renewable_share_raw"
+  ) %>%
+  # Extract nested attributes using Regular Expressions
+  extract(
+    col = `Grid Region / Scale Level`,
+    into = c("grid_region", "operation_scale", "grid_structure"),
+    regex = "^(.*?) \\((.*?) / (.*?)\\)$"
+  ) %>%
+  # Clean percent values and convert types
+  mutate(
+    year = as.integer(year),
+    renewable_share_pct = as.numeric(str_remove(renewable_share_raw, "%")),
+    across(where(is.character), str_trim)
+  ) %>%
+  # Reorder columns and drop NA values
+  select(grid_region, operation_scale, grid_structure, year, renewable_share_pct) %>%
+  drop_na() %>%
+  # Standardize/normalize all column names to snake_case
+  clean_names()
+
+# Display the dataset with normalized variable names
+kable(head(tidy_data, 10), caption = "Tidy Dataset with Normalized Variable Names (snake_case)")
+```
+
+### 5. Analytical method
+
+The analysis utilizes a structured three-stage data processing pipeline:
+
+1.  **Tidy Data Transformation**: Wide-format year columns (`2018`–`2022`) are reshaped into standard long format via `pivot_longer()`, and composite string variables are parsed into discrete categorical features using regular expressions via `extract()`.
+
+2.  **Variable Normalization**: Dataset attributes are cleaned using `janitor::clean_names()` to standardize column names into a consistent, machine-readable `snake_case` format.
+
+3.  **Descriptive & Exploratory Aggregation**: Summary statistics—including arithmetic means, minimums, maximums, and 5-year absolute growth spans ($\text{max\_share} - \text{min\_share}$)—are computed across grouped regional and scale categories.
+
+### 6. Visualization of the output
+
+The below visualization consists of two faceted line charts comparing the percentage share of renewable energy adoption from 2018 to 2022 across four grid regions and two operational scale levels.
+
+```{r visualization, fig.width=9, fig.height=5}
+# 1. Trend Analysis Plot across Grid Regions and Operation Scales
+ggplot(tidy_data, aes(x = year, y = renewable_share_pct, color = grid_region, group = grid_region)) +
+  geom_line(linewidth = 1.2) +
+  geom_point(size = 3) +
+  facet_wrap(~ operation_scale) +
+  scale_y_continuous(labels = scales::percent_format(scale = 1)) +
+  scale_x_continuous(breaks = 2018:2022) +
+  labs(
+    title = "Trajectory of Renewable Energy Share (2018–2022)",
+    subtitle = "Comparing adoption trends across grid regions and scale levels",
+    x = "Year",
+    y = "Renewable Share (%)",
+    color = "Grid Region"
+  ) +
+  theme_minimal(base_size = 12) +
+  theme(
+    legend.position = "bottom",
+    panel.grid.minor = element_blank(),
+    plot.title = element_text(face = "bold")
+  )
+
+
+```
+
+### Overall Positive Trajectory Across All Regions:
+
+- Every grid region shows a consistent, upward slope over the 5-year period, indicating steady year-over-year adoption of renewable energy regardless of scale.
+
+### Small Scale Operations (Left Panel):
+
+- Western Grid (Purple Line): Leads the small-scale category by a wide margin, growing from \~25.5% in 2018 to nearly 38% in 2022.
+
+- Eastern Grid (Red Line): Operates at a much lower baseline, rising gradually from \~11% in 2018 to \~16% in 2022.
+
+### Utility Scale Operations (Right Panel):
+
+- Northern Grid (Green Line): Dominates the utility-scale category with the highest overall renewable share in the dataset, accelerating from \~32% in 2018 to over 45% by 2022.
+
+- Southern Grid (Teal Line): Shows steady growth, rising from \~20% in 2018 to roughly 29% in 2022.
+
+### Structural Takeaways:
+
+- Scale Segregation: Regions in this dataset are strictly divided by operational scale—Western and Eastern grids are tracked under Small Scale, while Northern and Southern grids are tracked under Utility Scale.
+
+- Growth Acceleration: Utility-scale adoption (specifically Northern Grid) shows a slightly steeper growth rate compared to small-scale implementations.
+
+```{r summary-table}
+# 2. Regional Performance Summary Table with Normalized Column Names
+summary_stats <- tidy_data %>%
+  group_by(grid_region, operation_scale) %>%
+  summarise(
+    mean_share = mean(renewable_share_pct, na.rm = TRUE),
+    min_share  = min(renewable_share_pct, na.rm = TRUE),
+    max_share  = max(renewable_share_pct, na.rm = TRUE),
+    absolute_growth = max(renewable_share_pct) - min(renewable_share_pct),
+    .groups = "drop"
+  ) %>%
+  arrange(desc(mean_share)) %>%
+  # Ensure output summary table headers are normalized
+  clean_names()
+
+kable(
+  summary_stats,
+  digits = 2,
+  caption = "Normalized Summary Metrics of Renewable Share Adoption (2018–2022)"
+)
+```
+
+### 7. Analysis/ Interpretation of results in context
+
+Across the observed five-year period from 2018 to 2022, every analyzed grid region exhibited a continuous upward trajectory in renewable energy adoption. The data demonstrates clear structural segmentation based on both geographic region and operational scale, revealing distinct adoption behaviors between utility-scale and small-scale implementations. Within the utility-scale sector, the Northern Grid stands out as the overall market leader across all measured dimensions, maintaining the highest mean renewable share at 38.46% and reaching a peak value of 45.6% in 2022. Furthermore, it recorded the fastest acceleration in the dataset, expanding by 13.2 percentage points over five years. Operating under the same utility-scale classification, the Southern Grid followed a steady upward path, progressing from 19.8% in 2018 to 29.3% in 2022 with an overall mean share of 24.30% and a total growth of 9.5 percentage points.
+
+In contrast, the small-scale sector demonstrated significant performance variations across geographies. The Western Grid achieved exceptional results within the small-scale category, recording an average renewable share of 31.36% and an overall growth of 12.2 percentage points as it climbed from 25.6% to 37.8%. Remarkably, the Western Grid's small-scale operations surpassed the Southern Grid's utility-scale metrics in both overall share and growth rate, proving that operational scale alone is not the sole driver of high renewable integration. Conversely, the Eastern Grid remained the lowest-performing sector in the dataset, starting at a baseline of 11.2% in 2018, averaging only 13.54%, and capping out at 16.2% in 2022. Its total expansion of 5.0 percentage points represents the slowest growth trajectory overall. This creates a notable growth disparity across the transition, where the leading Northern Grid expanded more than 2.6 times faster than the lagging Eastern Grid over the same timeframe.
+
+### 8. Conclusion
+
+From 2018 to 2022, all grid regions steadily increased their renewable energy share, with performance driven by both operational scale and geography. The utility-scale Northern Grid led overall adoption—achieving the highest mean share (38.46%) and fastest growth (+13.2%)—while the Southern Grid saw steady, moderate gains (+9.5%). In the small-scale category, results diverged dramatically: the Western Grid expanded rapidly from 25.6% to 37.8% (outperforming the utility-scale Southern Grid), whereas the Eastern Grid lagged behind as the lowest performer, growing just 5 percentage points to reach 16.2%.
