@@ -1,0 +1,71 @@
+<h3>Welcome to the assignement: working with HTML</h3>
+<p>I have chosen the the books that are mentioned in the following table:</p>
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Astrophysics Books Table</title>
+    <style>
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            font-family: Arial, sans-serif;
+            margin-top: 20px;
+        }
+        th, td {
+            border: 1px solid #dddddd;
+            text-align: left;
+            padding: 12px;
+        }
+        th {
+            background-color: #f2f2f2;
+            color: #333333;
+        }
+        tr:nth-child(even) {
+            background-color: #f9f9f9;
+        }
+    </style>
+</head>
+<body>
+
+    <h2>Recommended Books on Astrophysics and Cosmology</h2>
+
+    <table>
+        <thead>
+            <tr>
+                <th>Title</th>
+                <th>Authors</th>
+                <th>Publication Year</th>
+                <th>Publisher</th>
+                <th>Genre</th>
+            </tr>
+        </thead>
+        <tbody>
+            <tr>
+                <td>A Brief History of Time</td>
+                <td>Stephen Hawking</td>
+                <td>1988</td>
+                <td>Bantam Books</td>
+                <td>Cosmology / Popular Science</td>
+            </tr>
+            <tr>
+                <td>The Grand Design</td>
+                <td>Stephen Hawking and Leonard Mlodinow</td>
+                <td>2010</td>
+                <td>Bantam Books</td>
+                <td>Physics / Philosophy of Science</td>
+            </tr>
+            <tr>
+                <td>Astrophysics for People in a Hurry</td>
+                <td>Neil deGrasse Tyson</td>
+                <td>2017</td>
+                <td>W. W. Norton & Company</td>
+                <td>Astrophysics / Popular Science</td>
+            </tr>
+        </tbody>
+    </table>
+
+</body>
+</html>

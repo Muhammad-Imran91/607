@@ -1,0 +1,28 @@
+{
+  "assignment_title": "Welcome to the assignement: working with HTML",
+  "intro_text": "I have chosen the the books that are mentioned in the following table:",
+  "section_title": "Recommended Books on Astrophysics and Cosmology",
+  "books": [
+    {
+      "title": "A Brief History of Time",
+      "authors": "Stephen Hawking",
+      "publication_year": 1988,
+      "publisher": "Bantam Books",
+      "genre": "Cosmology / Popular Science"
+    },
+    {
+      "title": "The Grand Design",
+      "authors": "Stephen Hawking and Leonard Mlodinow",
+      "publication_year": 2010,
+      "publisher": "Bantam Books",
+      "genre": "Physics / Philosophy of Science"
+    },
+    {
+      "title": "Astrophysics for People in a Hurry",
+      "authors": "Neil deGrasse Tyson",
+      "publication_year": 2017,
+      "publisher": "W. W. Norton & Company",
+      "genre": "Astrophysics / Popular Science"
+    }
+  ]
+}
