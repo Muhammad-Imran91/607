@@ -1,0 +1,130 @@
+---
+title: "HTML & Json comparison"
+author: "Muhammad Imran"
+format: html
+editor: visual
+echo: false
+warning: false
+---
+
+# Working with HTML, JSON, and Multi-Format Data Structures in R
+
+This document provides a complete, structured methodology for approaching assignments involving multi-format data integration (specifically HTML and JSON), hosting files on GitHub, reading remote data directly into R, and performing comparative structural analyses. it also induces the code and probable results.
+
+## 1. Conceptual Framework & Objectives
+
+When completing tasks that require cross-format data ingestion, the primary goal is to understand how different file formats store relational data, how web protocols (like raw GitHub links) serve these assets, and how programming languages parse them into consistent rectangular data structures (data frames).
+
+**Key Learning Objectives:**
+
+- Data Structuring & Serialization: Designing clean, standardized datasets in both markup (HTML) and structured hierarchical (JSON) formats.
+
+- Remote Version Control Integration: Hosting raw data assets on GitHub and accessing them programmatically using direct raw URLs (raw.githubusercontent.com).
+
+- Multi-Format Ingestion in R: Utilizing domain-specific packages (rvest for HTML parsing and jsonlite for JSON parsing) to ingest remote text.
+
+- Table Rendering: Presenting data cleanly using formatting packages.
+
+- Comparative Validation: Assessing structural identity, type coercion differences, and schema variations between different file formats holding identical semantic information.
+
+## 2. Step-by-Step Execution Workflow
+
+**STEP 1: DATA DESIGN & MODELING:** I have chosen three books i.e. A Brief History of Time, The Grand Design and Astrophysics for People in a Hurry and find out their authors, publication year, publisher and genre.
+
+**STEP 2: FILE CREATION & FORMATTING:** Thereafter, building an HTML file featuring structured table elements and likewise building a JSON file utilizing nested objects and arrays.
+
+**STEP 3: REMOTE HOSTING & RAW LINK RESOLUTION:** Ipushed files to a public GitHub of my account and obtained obtained the raw asset URL (raw.githubusercontent.com) to bypass UI wrapper HTML.
+
+**STEP 4: R INGESTION & PARSING PIPELINE**: Following sub-steps are taken under this step:
+
+- Ingest HTML via \`rvest::read_html()\` and extract nodes with \`html_table()\`
+
+- Ingest JSON via \`jsonlite::fromJSON()\` into lists and data frames
+
+**STEP 5: VISUALIZATION & COMPARATIVE ANALYSIS:** Following sub-steps are taken under this step:
+
+- Render formatted tables using \`knitr::kable()\` and \`kableExtra\`
+
+- Execute structural checks (\`identical()\`, \`all.equal()\`) to evaluate parity
+
+```{r}
+
+library(jsonlite)
+library(rvest)
+library(knitr)
+library(kableExtra)
+
+# ==========================================
+# 1. LOAD AND DISPLAY THE HTML FILE
+# ==========================================
+html_url <- "https://raw.githubusercontent.com/Muhammad-Imran91/607/main/books.html"
+
+# Read the HTML content and extract the table
+html_data <- read_html(html_url)
+html_table_df <- html_data %>% 
+  html_node("table") %>% 
+  html_table()
+
+# Render a styled table for the HTML data
+cat("=== Table from HTML File ===\n")
+html_table_df %>%
+  kable(
+    caption = "Books Data Extracted from GitHub HTML File",
+    align = c("l", "l", "c", "l", "l")
+  ) %>%
+  kable_styling(
+    bootstrap_options = c("striped", "hover", "condensed", "responsive"),
+    full_width = FALSE,
+    position = "center"
+  )
+
+# ==========================================
+# 2. LOAD AND DISPLAY THE JSON FILE
+# ==========================================
+json_url <- "https://raw.githubusercontent.com/Muhammad-Imran91/607/main/Books.json"
+
+# Read and parse the JSON file
+json_data <- fromJSON(json_url)
+books_df <- json_data$books
+
+# Render a styled table for the JSON data
+cat("\n=== Table from JSON File ===\n")
+books_df %>%
+  kable(
+    caption = paste("Books Data Extracted from GitHub JSON File", json_data$subject),
+    col.names = c("Title", "Authors", "Publication Year", "Publisher", "Genre"),
+    align = c("l", "l", "c", "l", "l")
+  ) %>%
+  kable_styling(
+    bootstrap_options = c("striped", "hover", "condensed", "responsive"),
+    full_width = FALSE,
+    position = "center"
+  )
+```
+
+```{r}
+
+# ==========================================
+# 2. comparing two tables FILE
+# ==========================================
+# Compare if the data frames are identical overall
+identical(html_table_df, books_df)
+
+# Compare column by column (using base R or dplyr)
+compare_results <- all.equal(html_table_df, books_df)
+print(compare_results)
+```
+
+## Comparison Analysis: Similarities and Differences
+
+## 1. Are they identical?
+
+No, they are not strictly identical. While they contain the exact same core information about the books, their data structures and underlying types have minor differences due to how HTML tables are parsed versus how JSON objects are structured.
+
+## 2. Similarities
+
+- Content and Values: Both data frames represent the exact same three books (Stephen Hawking's and Neil deGrasse Tyson's works) and hold identical text values for titles, publishers, and genres.
+
+- Dimensions: Both data frames share the same dimensions—3 rows and 5 columns.
+
+- Column Representation: Both tables cover the same attributes: Title, Authors, Publication Year, Publisher, and Genre.
