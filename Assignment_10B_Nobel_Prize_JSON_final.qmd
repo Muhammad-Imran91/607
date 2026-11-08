@@ -1,0 +1,511 @@
+---
+title: "Assignment 10B: More JSON Practice — Exploring Nobel Prize Data"
+author: "Your Name"
+date: today
+format:
+  pdf:
+    toc: true
+    toc-depth: 3
+    number-sections: true
+execute:
+  echo: true
+  warning: false
+  message: false
+---
+
+## Introduction and analytical approach
+
+This report uses the Nobel Prize public API to investigate patterns in Nobel laureates. It retrieves JSON data directly in R, extracts nested records, creates tidy data frames, and uses those data to answer four questions.
+
+1. **How has the number of Nobel laureate awards changed over time?**
+2. **Which countries have the largest number of laureates by recorded country of birth?**
+3. **Which countries have the largest difference between the number of laureates born there and the number affiliated with institutions there when awarded?**
+4. **How does the recorded gender distribution vary across Nobel Prize categories?**
+
+Here, question 3 goes beyond simple counts: it joins birthplace and award-affiliation information using the unique laureate ID, then compares the two country-level measures.
+
+The Nobel Prize API returns nested JSON. A laureate can have multiple prizes, and a prize record can contain multiple affiliations. The analysis therefore creates two tidy tables: one row per laureate and one row per laureate–prize–affiliation combination.
+
+## Retrieve JSON from the Nobel Prize API
+
+The analysis uses the official Nobel Prize API v2.1 laureates endpoint. Each laureate record contains biographical information and an array of Nobel Prize records. Pagination is handled with `offset` and `limit`; the loop continues until all records reported by the API have been retrieved.
+
+```{r echo=FALSE}
+# Install once if needed:
+# install.packages(c("httr2", "jsonlite", "dplyr", "tidyr",
+#                    "purrr", "stringr", "ggplot2", "knitr", "scales"))
+
+library(httr2)
+library(jsonlite)
+library(dplyr)
+library(tidyr)
+library(purrr)
+library(stringr)
+library(ggplot2)
+library(knitr)
+library(scales)
+
+api_url <- "https://api.nobelprize.org/2.1/laureates"
+
+get_all_laureates <- function(page_size = 1000) {
+  offset <- 0L
+  records <- list()
+  total_count <- Inf
+
+  while (offset < total_count) {
+    response <- request(api_url) |>
+      req_url_query(limit = page_size, offset = offset, format = "json") |>
+      req_user_agent("R Quarto educational analysis") |>
+      req_perform()
+
+    resp_check_status(response)
+    payload <- fromJSON(resp_body_string(response), simplifyVector = FALSE)
+
+    if (is.null(payload$laureates)) {
+      stop("The API response did not contain a 'laureates' field.")
+    }
+
+    page_records <- payload$laureates
+    if (length(page_records) == 0) break
+
+    records <- c(records, page_records)
+
+    total_count <- as.integer(payload$meta$count %||% NA_integer_)
+    if (is.na(total_count)) {
+      # Fallback: stop when the API returns fewer records than requested.
+      if (length(page_records) < page_size) break
+    }
+
+    offset <- offset + length(page_records)
+    if (length(page_records) < page_size) break
+  }
+
+  records
+}
+
+# Local null-coalescing helper for optional JSON fields.
+`%||%` <- function(x, y) {
+  if (is.null(x) || length(x) == 0) y else x
+}
+
+laureate_json <- get_all_laureates()
+
+length(laureate_json)
+```
+
+The response is retained as a list of nested R objects. The next step extracts the fields needed for the four questions.
+
+## Transform nested JSON into tidy data frames
+
+The API uses multilingual text objects such as `{"en": "Sweden"}`. The helper `get_text()` extracts the English value when available and otherwise returns a missing value. The code also accommodates absent optional fields. The sample of the data is as under:
+
+```{r echo=FALSE}
+get_text <- function(x) {
+  if (is.null(x) || length(x) == 0) return(NA_character_)
+
+  if (is.character(x) || is.numeric(x)) {
+    return(as.character(x[[1]]))
+  }
+
+  if (is.list(x)) {
+    for (language in c("en", "no", "se")) {
+      if (!is.null(x[[language]])) {
+        return(as.character(x[[language]][[1]]))
+      }
+    }
+  }
+
+  NA_character_
+}
+
+get_year <- function(x) {
+  if (is.null(x) || length(x) == 0) return(NA_integer_)
+  year_text <- str_extract(as.character(x[[1]]), "^\\d{4}")
+  suppressWarnings(as.integer(year_text))
+}
+
+get_birth_country <- function(x) {
+  get_text(x$birth$place$country)
+}
+
+# Table 1: one row per laureate (person or organization).
+laureates <- map_dfr(laureate_json, function(x) {
+  full_name <- get_text(x$fullName)
+  if (is.na(full_name)) full_name <- get_text(x$knownName)
+  if (is.na(full_name)) full_name <- get_text(x$orgName)
+
+  tibble(
+    laureate_id = as.character(x$id %||% NA_character_),
+    full_name = full_name,
+    gender = as.character(x$gender %||% NA_character_),
+    birth_year = get_year(x$birth$date),
+    birth_country = get_birth_country(x)
+  )
+}) |>
+  mutate(
+    gender = na_if(gender, ""),
+    birth_country = na_if(birth_country, "")
+  ) |>
+  distinct(laureate_id, .keep_all = TRUE)
+
+# Table 2: one row per laureate–prize–affiliation.
+# If a prize has no affiliation, retain one row with a missing country.
+laureate_awards <- map_dfr(laureate_json, function(person) {
+  prizes <- person$nobelPrizes %||% list()
+
+  map_dfr(prizes, function(prize) {
+    affiliations <- prize$affiliations %||% list()
+    if (length(affiliations) == 0) affiliations <- list(NULL)
+
+    map_dfr(affiliations, function(affiliation) {
+      affiliation_country <- if (is.null(affiliation)) {
+        NA_character_
+      } else {
+        get_text(affiliation$country)
+      }
+
+      tibble(
+        laureate_id = as.character(person$id %||% NA_character_),
+        award_year = get_year(prize$awardYear),
+        category = get_text(prize$category),
+        award_country = affiliation_country,
+        motivation = get_text(prize$motivation)
+      )
+    })
+  })
+}) |>
+  mutate(
+    category = str_to_title(category),
+    award_country = na_if(award_country, "")
+  ) |>
+  distinct()
+
+# Inspect the tidy data frames.
+glimpse(laureates)
+glimpse(laureate_awards)
+
+# Confirm that each laureate ID in the award table can be linked to a
+# laureate record.
+unmatched_award_ids <- anti_join(
+  laureate_awards |> distinct(laureate_id),
+  laureates |> distinct(laureate_id),
+  by = "laureate_id"
+)
+
+nrow(unmatched_award_ids)
+```
+
+** Unit of analysis.**  `laureates` contains one row per laureate. `laureate_awards` contains one row per laureate–prize–affiliation. A laureate with multiple prizes or multiple listed affiliations can therefore appear more than once in the second table. This is intentional and is handled explicitly in the relevant summaries.
+
+## Question 1: How has the number of Nobel laureate awards changed over time?
+
+### Rationale
+
+A yearly trend helps show how many individual laureates have been recognized over time. The measure below counts laureate–prize associations. A prize shared by three individuals contributes three laureate awards.
+
+```{r echo=FALSE}
+awards_by_year <- laureate_awards |>
+  filter(!is.na(award_year)) |>
+  distinct(laureate_id, award_year, category) |>
+  count(award_year, name = "laureate_awards") |>
+  arrange(award_year)
+
+kable(
+  awards_by_year |> slice_head(n = 10),
+  caption = "First ten award years in the retrieved data"
+)
+
+ggplot(awards_by_year, aes(x = award_year, y = laureate_awards)) +
+  geom_line(linewidth = 0.6) +
+  geom_point(size = 1.2) +
+  scale_x_continuous(breaks = pretty_breaks()) +
+  labs(
+    title = "Nobel laureate awards by year",
+    x = "Award year",
+    y = "Number of laureate–prize associations",
+    caption = "Source: Nobel Prize API v2.1; data retrieved when this report was rendered."
+  ) +
+  theme_minimal()
+```
+
+```{r echo=FALSE}
+awards_by_year |>
+  summarise(
+    first_year = min(award_year, na.rm = TRUE),
+    last_year = max(award_year, na.rm = TRUE),
+    minimum_annual_awards = min(laureate_awards, na.rm = TRUE),
+    maximum_annual_awards = max(laureate_awards, na.rm = TRUE),
+    average_annual_awards = round(mean(laureate_awards, na.rm = TRUE), 2)
+  ) |>
+  kable(caption = "Summary of annual laureate awards")
+```
+
+** Interpretation.** The line chart identifies long-term changes and unusually high or low years in the number of laureate–prize associations. This is not the same as counting prize categories or prize ceremonies. Years with no award are not displayed because the data contain no laureate–prize records for those years.
+
+## Question 2 — Which countries have the largest number of laureates by recorded birthplace?
+
+### Rationale
+
+This question examines the geographical distribution of laureates using the country recorded in each laureate's birth information. Each laureate is counted once, even if that person received more than one Nobel Prize.
+
+```{r echo=FALSE}
+birth_country_counts <- laureates |>
+  filter(!is.na(birth_country), birth_country != "") |>
+  distinct(laureate_id, birth_country) |>
+  count(birth_country, name = "laureates_born") |>
+  arrange(desc(laureates_born))
+
+top_birth_countries <- birth_country_counts |>
+  slice_max(laureates_born, n = 15, with_ties = FALSE)
+
+kable(
+  top_birth_countries,
+  caption = "Top 15 recorded birth countries by number of laureates"
+)
+
+ggplot(top_birth_countries,
+       aes(x = reorder(birth_country, laureates_born),
+           y = laureates_born)) +
+  geom_col() +
+  coord_flip() +
+  labs(
+    title = "Countries with the most Nobel laureates by birthplace",
+    x = "Recorded birth country",
+    y = "Number of laureates"
+  ) +
+  theme_minimal()
+```
+
+**Interpretation.** The ranking identifies countries most frequently represented in the recorded birthplace data. It is descriptive, not a direct measure of national research performance. Population size, historical borders, migration, access to education, and record completeness may all influence the results.
+
+## Question 3 — Which countries have the largest difference between laureates born there and laureates affiliated there when awarded?
+
+### Rationale
+
+This question compares two country-level measures for the same laureates:
+
+- **Birth country:** the country recorded in the laureate's birth-place information.
+- **Award affiliation country:** the country recorded for an institution associated with the laureate's prize.
+
+The two tables are joined by `laureate_id`. Each laureate is counted once per country in each measure. The net balance is calculated as:
+
+\[
+\text{Net balance} = \text{Born in country} - \text{Affiliated with country}
+\]
+
+A positive balance indicates more laureates born in the country than affiliated with it at the time of the award. A negative balance indicates more laureates affiliated with it than born there.
+
+```{r echo=FALSE}
+# Join award affiliation records to each laureate's recorded birth country.
+birth_affiliation <- laureate_awards |>
+  inner_join(
+    laureates |> select(laureate_id, birth_country),
+    by = "laureate_id"
+  ) |>
+  filter(
+    !is.na(birth_country),
+    !is.na(award_country)
+  ) |>
+  distinct(laureate_id, birth_country, award_country)
+
+# Count unique laureates by birth country.
+born_counts <- birth_affiliation |>
+  distinct(laureate_id, country = birth_country) |>
+  count(country, name = "born_count")
+
+# Count unique laureates by award affiliation country.
+affiliation_counts <- birth_affiliation |>
+  distinct(laureate_id, country = award_country) |>
+  count(country, name = "affiliated_count")
+
+country_comparison <- full_join(
+  born_counts,
+  affiliation_counts,
+  by = "country"
+) |>
+  mutate(
+    born_count = replace_na(born_count, 0L),
+    affiliated_count = replace_na(affiliated_count, 0L),
+    net_balance = born_count - affiliated_count
+  ) |>
+  arrange(desc(net_balance))
+
+positive_balance <- country_comparison |>
+  slice_max(net_balance, n = 10, with_ties = FALSE)
+
+negative_balance <- country_comparison |>
+  slice_min(net_balance, n = 10, with_ties = FALSE)
+
+kable(
+  positive_balance,
+  caption = "Countries with the largest positive birthplace-minus-affiliation balance"
+)
+
+kable(
+  negative_balance,
+  caption = "Countries with the largest negative birthplace-minus-affiliation balance"
+)
+```
+
+```{r echo=FALSE}
+largest_gaps <- country_comparison |>
+  mutate(absolute_gap = abs(net_balance)) |>
+  slice_max(absolute_gap, n = 15, with_ties = FALSE) |>
+  select(-absolute_gap) |>
+  pivot_longer(
+    cols = c(born_count, affiliated_count),
+    names_to = "measure",
+    values_to = "laureates"
+  ) |>
+  mutate(
+    measure = recode(
+      measure,
+      born_count = "Born in country",
+      affiliated_count = "Affiliated at award"
+    )
+  )
+
+ggplot(
+  largest_gaps,
+  aes(
+    x = reorder(country, laureates),
+    y = laureates,
+    fill = measure
+  )
+) +
+  geom_col(position = "dodge") +
+  coord_flip() +
+  labs(
+    title = "Birthplace and award affiliation: largest country gaps",
+    x = "Country",
+    y = "Number of unique laureates",
+    fill = "Measure"
+  ) +
+  theme_minimal()
+```
+
+** Interpretation.** Countries with a positive balance have more laureates born there than laureates affiliated with institutions there in the award records. Countries with a negative balance have more award affiliations than recorded births. These differences may reflect international migration, historical changes in borders and country names, institutional mobility, or missing affiliation information.
+
+** Important qualification:** award affiliation is not citizenship or nationality. In addition, some Nobel categories, particularly Literature and many Peace awards, may not have institutional affiliations. Consequently, this analysis is an indicator of differences between recorded birthplace and award affiliation, not a direct count of emigrants or immigrants.
+
+## Question 4 — How does recorded gender representation vary across Nobel Prize categories?
+
+### Rationale
+
+The gender distribution can differ across Nobel Prize categories. This analysis compares the number and percentage of laureate–prize associations by recorded gender within each category. Organizations and records without a gender value are excluded.
+
+```{r echo=FALSE}
+gender_by_category <- laureate_awards |>
+  inner_join(
+    laureates |> select(laureate_id, gender),
+    by = "laureate_id"
+  ) |>
+  filter(!is.na(gender), gender != "") |>
+  distinct(laureate_id, award_year, category, gender) |>
+  count(category, gender, name = "laureate_awards") |>
+  group_by(category) |>
+  mutate(
+    category_total = sum(laureate_awards),
+    percentage = 100 * laureate_awards / category_total
+  ) |>
+  ungroup()
+
+kable(
+  gender_by_category |>
+    select(category, gender, laureate_awards, percentage) |>
+    mutate(percentage = round(percentage, 1)),
+  caption = "Laureate awards by category and recorded gender"
+)
+
+ggplot(
+  gender_by_category,
+  aes(x = category, y = percentage, fill = gender)
+) +
+  geom_col() +
+  coord_flip() +
+  scale_y_continuous(labels = label_percent(scale = 1)) +
+  labs(
+    title = "Gender distribution across Nobel Prize categories",
+    x = "Nobel Prize category",
+    y = "Share of laureate–prize associations",
+    fill = "Recorded gender"
+  ) +
+  theme_minimal()
+```
+
+**Interpretation.** Percentages make categories with different total award counts easier to compare. The results describe the historical distribution of Nobel laureates, not the current gender composition of the academic or professional fields represented by the categories. The API's gender field is not applicable to organizations and may be missing for some records.
+
+## Data quality checks
+
+The following checks make missing information and potential join problems visible.
+
+```{r echo=FALSE}
+award_gender_check <- laureate_awards |>
+  left_join(
+    laureates |> select(laureate_id, gender),
+    by = "laureate_id"
+  )
+
+data_quality <- tibble(
+  check = c(
+    "Laureate records retrieved",
+    "Distinct laureate IDs",
+    "Laureates with missing birth country",
+    "Laureate–prize–affiliation rows",
+    "Award rows with missing affiliation country",
+    "Award rows with missing gender after join",
+    "Award IDs without a matching laureate record"
+  ),
+  value = c(
+    nrow(laureates),
+    n_distinct(laureates$laureate_id),
+    sum(is.na(laureates$birth_country)),
+    nrow(laureate_awards),
+    sum(is.na(laureate_awards$award_country)),
+    sum(is.na(award_gender_check$gender)),
+    nrow(unmatched_award_ids)
+  )
+)
+
+kable(data_quality, caption = "Data quality and completeness checks")
+```
+
+## Overall conclusion
+
+The four questions demonstrate how public JSON data can be converted into tidy analytical tables and used to investigate historical patterns in Nobel Prizes.
+
+1. The annual trend describes how the number of individual laureate–prize associations has changed over time.
+2. The birthplace analysis identifies countries most frequently represented in the recorded birth data.
+3. The birthplace-versus-affiliation comparison demonstrates a relational analysis: it joins two attributes at the laureate level and compares their country distributions.
+4. The gender analysis compares representation across categories using within-category percentages.
+
+Together, these analyses demonstrate JSON retrieval, nested-data extraction, data cleaning, joining, grouping, aggregation, visualization, and interpretation. The findings are descriptive: they identify patterns and differences but do not establish why those patterns occurred.
+
+## Limitations
+
+- **API updates:** Results reflect the data available when the report is rendered. New awards and corrections can change the results.
+- **Historical country labels:** Borders and country names have changed. A historical birthplace label may not correspond directly to a present-day country.
+- **Missing information:** Some records lack birth-country, gender, or affiliation information. Excluding missing values can affect rankings and comparisons.
+- **Affiliation is not citizenship:** The country associated with an award affiliation does not necessarily represent the laureate's nationality or citizenship.
+- **Multiple affiliations:** Some laureates have more than one institutional affiliation. A laureate may therefore be associated with more than one country.
+- **Categories without institutional affiliations:** Literature and many Peace awards may not list institutional affiliations, reducing the coverage of Question 3.
+- **Organizations:** Nobel Prizes can be awarded to organizations. Gender analysis is therefore restricted to individual laureates with a recorded gender.
+- **Descriptive analysis:** These analyses identify associations and historical patterns; they do not establish causation.
+
+## Way forward
+
+The analysis could be extended in several ways:
+
+1. **Standardize country names:** Develop a documented country crosswalk to harmonize historical country labels with present-day names while retaining the original API values.
+2. **Investigate mobility more rigorously:** Distinguish birthplace, citizenship, nationality, and institutional affiliation rather than treating them as equivalent.
+3. **Examine trends by decade:** Compare country and gender patterns over time to identify changes in representation.
+4. **Compare categories statistically:** Use appropriate statistical tests to examine whether gender distributions differ across categories, while considering the historical number of awards.
+5. **Validate unusual records:** Manually inspect laureates with multiple affiliations, missing birthplaces, or historical country labels.
+6. **Improve reproducibility:** Record the retrieval date and preserve a copy of the raw JSON response so future results can be compared with the same snapshot.
+
+## References
+
+- Nobel Prize Developer Zone: <https://www.nobelprize.org/about/developer-zone-2/>
+- Nobel Prize API v2.1, laureates endpoint: <https://api.nobelprize.org/2.1/laureates>
+- Nobel Prize API documentation: <https://nobelprize.readme.io/reference/getting-started>
+- R packages: `httr2`, `jsonlite`, `dplyr`, `tidyr`, `purrr`, `stringr`, `ggplot2`, `knitr`, and `scales`.
