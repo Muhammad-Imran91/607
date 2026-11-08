@@ -1,0 +1,481 @@
+---
+title: "Sentiment Analysis with Text Mining in R: Reproduction and Extension"
+author: "Muhammad Imran"
+date: "`r Sys.Date()`"
+format:
+  html:
+    toc: true
+    toc-depth: 3
+    number-sections: true
+    theme: cosmo
+    code-fold: false
+    highlight-style: github
+execute:
+  warning: false
+  message: false
+---
+
+# Introduction
+
+Sentiment analysis (or opinion mining) allows data scientists to programmatically evaluate the emotional content of written text. By converting unigrams (single words) into tidy data frames, I can use simple relational operations, such as inner_join(), to measure sentiment trajectories and word distributions across literary works or modern corpora.
+
+This report is divided into two primary sections:
+
+## Step 1: Reproduce the Base Example:
+
+Replicating the core sentiment analysis workflows from Chapter 2 of Text Mining with R by Julia Silge and David Robinson, using Jane Austen's novels and the bing, nrc, and afinn lexicons.
+
+## Step 2: Extend the Analysis:
+
+Extending the methodology to a new corpus, specifically, classic science fiction novels by H.G. Wells obtained via gutenbergr and incorporating a fourth sentiment dictionary, the domain-tailored Loughran-McDonald lexicon (loughran). I compare narrative sentiment arcs, lexicon performance, and structural differences in emotion classification.
+
+```{r echo=FALSE}
+# Load required libraries
+library(tidyverse)
+library(tidytext)
+library(janeaustenr)
+library(gutenbergr)
+library(wordcloud)
+library(reshape2)
+library(textdata) # Required for Loughran-McDonald & AFINN access
+
+# Set global ggplot theme
+theme_set(theme_minimal())
+```
+
+**Step 1: Reproducing the Base Example**
+
+Original Reference:
+
+Silge, J., & Robinson, D. (2017). Text Mining with R: A Tidy Approach. O'Reilly Media.
+
+Chapter 2: "Sentiment analysis with tidy data".
+
+Online resource is below: https://www.tidytextmining.com/sentiment.html
+
+<https://www.tidytextmining.com/sentiment.html>
+
+**1.1 Tokenizing Jane Austen's Novels**
+
+In this step, I would tokenize Jane Austen's six completed novels into a tidy dataset where each row corresponds to one word, keeping track of the line number and chapter structure. The sample of 6 rows is as under:
+
+```{r echo=FALSE}
+# Tokenize Jane Austen's novels into unigrams
+tidy_books <- austen_books() %>%
+  group_by(book) %>%
+  mutate(
+    linenumber = row_number(),
+    chapter = cumsum(str_detect(text, regex("^chapter [\\divxlc]", ignore_case = TRUE)))
+  ) %>%
+  ungroup() %>%
+  unnest_tokens(word, text)
+
+head(tidy_books)
+
+```
+
+**1.2 Exploring NRC Joy Words in Emma**
+
+Using an inner_join() with the NRC lexicon filtered for "joy", I wil find the most frequent joyful words in Austen's Emma. The sample table showing the 10 rows is as under.
+
+```{r echo=FALSE}
+# Extract joy words from NRC lexicon
+nrc_joy <- get_sentiments("nrc") %>% 
+  filter(sentiment == "joy")
+
+# Count top joy words in Emma
+emma_joy_counts <- tidy_books %>%
+  filter(book == "Emma") %>%
+  inner_join(nrc_joy, by = "word") %>%
+  count(word, sort = TRUE)
+
+head(emma_joy_counts, 10)
+
+```
+
+**1.3 Plotting Narrative Sentiment Trajectories across Austen's Novels**
+
+Using the **Bing et al.** lexicon, I would divide each novel into 80-line chunks, calculate positive and negative word counts, and plot the net sentiment (\$\\text{sentiment} = \\text{positive} - \\text{negative}\$) over narrative time.
+
+```{r echo=FALSE}
+# Calculate net sentiment using Bing lexicon per 80 lines
+jane_austen_sentiment <- tidy_books %>%
+  inner_join(get_sentiments("bing"), by = "word") %>%
+  count(book, index = linenumber %/% 80, sentiment) %>%
+  pivot_wider(names_from = sentiment, values_from = n, values_fill = 0) %>% 
+  mutate(sentiment = positive - negative)
+
+# Plot net sentiment across novels
+ggplot(jane_austen_sentiment, aes(x = index, y = sentiment, fill = book)) +
+  geom_col(show.legend = FALSE) +
+  facet_wrap(~book, ncol = 2, scales = "free_x") +
+  labs(
+    title = "Sentiment Trajectories in Jane Austen's Novels (Bing Lexicon)",
+    x = "Narrative Time (80-line sections)",
+    y = "Net Sentiment (Positive - Negative)"
+  )
+
+```
+
+**1.4 Comparing Three Lexicons on Pride and Prejudice**
+
+Thereafter, I compare how AFINN, Bing, and NRC score narrative trajectory in Pride and Prejudice.
+
+```{r echo=FALSE}
+# Filter for Pride & Prejudice
+pride_prejudice <- tidy_books %>% 
+  filter(book == "Pride & Prejudice")
+
+# AFINN score calculation
+afinn_pp <- pride_prejudice %>% 
+  inner_join(get_sentiments("afinn"), by = "word") %>% 
+  group_by(index = linenumber %/% 80) %>% 
+  summarise(sentiment = sum(value)) %>% 
+  mutate(method = "AFINN")
+
+# Bing and NRC score calculation
+bing_nrc_pp <- bind_rows(
+  pride_prejudice %>% 
+    inner_join(get_sentiments("bing"), by = "word") %>%
+    mutate(method = "Bing et al."),
+  pride_prejudice %>% 
+    inner_join(get_sentiments("nrc") %>% 
+                 filter(sentiment %in% c("positive", "negative")), by = "word") %>%
+    mutate(method = "NRC")
+) %>%
+  count(method, index = linenumber %/% 80, sentiment) %>%
+  pivot_wider(names_from = sentiment, values_from = n, values_fill = 0) %>% 
+  mutate(sentiment = positive - negative)
+
+# Combine and plot
+bind_rows(afinn_pp, bing_nrc_pp) %>%
+  ggplot(aes(x = index, y = sentiment, fill = method)) +
+  geom_col(show.legend = FALSE) +
+  facet_wrap(~method, ncol = 1, scales = "free_y") +
+  labs(
+    title = "Comparison of Sentiment Lexicons on 'Pride and Prejudice'",
+    x = "Narrative Time (80-line sections)",
+    y = "Net Sentiment"
+  )
+
+```
+
+**1.5 Most Common Positive and Negative Words**
+
+Identifying which unigrams contribute most to Bing sentiment classification highlights potential domain mismatch (e.g., "miss" used as a formal honorific rather than a negative verb).
+
+```{r echo=FALSE}
+# Count top words contributing to Bing positive/negative classification
+bing_word_counts <- tidy_books %>%
+  inner_join(get_sentiments("bing"), by = "word") %>%
+  count(word, sentiment, sort = TRUE) %>%
+  ungroup()
+
+bing_word_counts %>%
+  group_by(sentiment) %>%
+  slice_max(n, n = 10) %>% 
+  ungroup() %>%
+  mutate(word = reorder(word, n)) %>%
+  ggplot(aes(x = n, y = word, fill = sentiment)) +
+  geom_col(show.legend = FALSE) +
+  facet_wrap(~sentiment, scales = "free_y") +
+  labs(
+    title = "Top Words Contributing to Sentiment in Jane Austen Novels",
+    x = "Contribution to Sentiment Score",
+    y = NULL
+  )
+```
+
+**Step 2: Extending the Analysis**
+
+To extend the textbook example, I apply sentiment mining to a different literary genre and incorporate a fourth sentiment lexicon:
+
+New Corpus (Simple Literary Genre): Grimm's Household Tales (Fairy Tales) by Jacob and Wilhelm Grimm, downloaded via gutenbergr (Gutenberg ID: 2591). Fairy tales have simple, recognizable emotional trajectories (e.g., hardship leading to a happy ending).
+
+Binary Lexicon Comparison: I will focus exclusively on binary sentiment classification (positive vs. negative). We construct a dedicated NRC Binary Lexicon (filtering NRC to only positive and negative entries) and compare its performance directly against the Bing Lexicon across the fairy tales.
+
+**2.1 Corpus Acquisition & Tidy Preparation**
+
+I download four classic works by H.G. Wells from Project Gutenberg as follows:
+
+```{r echo=FALSE}
+library(gutenbergr)
+library(dplyr)
+library(stringr)
+library(tidytext)
+
+# Download H.G. Wells novels using Project Gutenberg IDs
+# 35: The Time Machine
+# 36: The War of the Worlds
+# 523: The Invisible Man
+# 159: The Island of Doctor Moreau
+
+wells_raw <- gutenberg_download(
+  c(35, 36, 523, 159), 
+  meta_fields = "title"
+)
+
+# Tidy the corpus
+tidy_wells <- wells_raw %>%
+  filter(!is.na(text)) %>%
+  group_by(title) %>%
+  mutate(
+    linenumber = row_number(),
+    chapter = cumsum(str_detect(text, regex("^chapter", ignore_case = TRUE)))
+  ) %>%
+  ungroup() %>%
+  unnest_tokens(word, text)
+
+# Summary count of words per book
+tidy_wells %>%
+  count(title, sort = TRUE)
+```
+
+**2.2 Integrating the Fourth Lexicon: Loughran-McDonald**
+
+The Loughran-McDonald dictionary classifies words into financial and operational sentiments: positive, negative, litigious, uncertainty, constraining, and superfluous. I filter for positive and negative tokens to allow direct comparison with Bing and NRC binary scores. which are as follows:
+
+```{r echo=FALSE}
+# Retrieve Loughran-McDonald lexicon
+loughran_lex <- get_sentiments("loughran") %>%
+  filter(sentiment %in% c("positive", "negative"))
+
+# View lexicon summary
+table(loughran_lex$sentiment)
+```
+
+**2.3 Comparative Sentiment Trajectories across 4 Lexicons**
+
+Thereafter, I compute sentiment trajectories for H.G. Wells' The War of the Worlds using AFINN, Bing, NRC, and Loughran-McDonald.
+
+```{r echo=FALSE}
+library(dplyr)
+library(tidyr)
+library(stringr)
+library(ggplot2)
+library(tidytext)
+library(gutenbergr)
+
+# --- 1. Safely Download and Prepare Corpus ---
+# Fetch 'The War of the Worlds' by H.G. Wells (Gutenberg ID 36)
+wells_raw <- gutenberg_download(c(36), meta_fields = "title")
+
+tidy_wells <- wells_raw %>%
+  filter(!is.na(text)) %>%
+  mutate(linenumber = row_number()) %>%
+  unnest_tokens(word, text) %>%
+  mutate(word = str_to_lower(word))
+
+# Filter specifically for The War of the Worlds safely using regex
+war_of_worlds <- tidy_wells %>% 
+  filter(str_detect(title, regex("War of the Worlds", ignore_case = TRUE)))
+
+# STOP CHECK: Verify data is not empty
+if (nrow(war_of_worlds) == 0) {
+  stop("Error: 'war_of_worlds' is empty. Please check your title filter or initial dataset download.")
+}
+
+# --- 2. Load Lexicons Safely ---
+afinn_lex    <- get_sentiments("afinn")
+bing_lex     <- get_sentiments("bing")
+nrc_lex      <- get_sentiments("nrc")
+loughran_lex <- get_sentiments("loughran")
+
+# --- 3. Compute Sentiment Trajectories ---
+
+# 1. AFINN (Numeric scoring -5 to +5)
+afinn_wow <- war_of_worlds %>%
+  inner_join(afinn_lex, by = "word") %>%
+  group_by(index = linenumber %/% 80) %>%
+  summarise(sentiment = sum(value, na.rm = TRUE), .groups = "drop") %>%
+  mutate(method = "AFINN")
+
+# 2. Binary Lexicons (Bing, NRC Binary, Loughran-McDonald Binary)
+bing_data <- war_of_worlds %>%
+  inner_join(bing_lex, by = "word") %>%
+  mutate(method = "Bing et al.")
+
+nrc_data <- war_of_worlds %>%
+  inner_join(nrc_lex %>% filter(sentiment %in% c("positive", "negative")), by = "word") %>%
+  mutate(method = "NRC")
+
+loughran_data <- war_of_worlds %>%
+  inner_join(loughran_lex %>% filter(sentiment %in% c("positive", "negative")), by = "word") %>%
+  mutate(method = "Loughran-McDonald")
+
+binary_wow <- bind_rows(bing_data, nrc_data, loughran_data) %>%
+  count(method, index = linenumber %/% 80, sentiment) %>%
+  pivot_wider(names_from = sentiment, values_from = n, values_fill = 0)
+
+# Ensure positive and negative columns exist safely
+if (!"positive" %in% names(binary_wow)) binary_wow$positive <- 0
+if (!"negative" %in% names(binary_wow)) binary_wow$negative <- 0
+
+binary_wow <- binary_wow %>%
+  mutate(sentiment = positive - negative) %>%
+  select(index, sentiment, method)
+
+# Combine all 4 methods
+all_wow_sentiment <- bind_rows(afinn_wow, binary_wow) %>%
+  mutate(method = factor(method, levels = c("AFINN", "Bing et al.", "NRC", "Loughran-McDonald")))
+
+# --- 4. Validation Diagnostics ---
+cat("Total rows in war_of_worlds:", nrow(war_of_worlds), "\n")
+cat("Total rows in AFINN trajectory:", nrow(afinn_wow), "\n")
+cat("Total rows in Binary trajectories:", nrow(binary_wow), "\n")
+cat("Total rows in Final Merged Data:", nrow(all_wow_sentiment), "\n")
+
+# --- 5. Render Plot ---
+ggplot(all_wow_sentiment, aes(x = index, y = sentiment, fill = method)) +
+  geom_col(show.legend = FALSE) +
+  facet_wrap(~method, ncol = 1, scales = "free_y") +
+  labs(
+    title = "Comparison of 4 Sentiment Lexicons on 'The War of the Worlds'",
+    subtitle = "Tracking narrative tension across 80-line sections",
+    x = "Narrative Time (80-line sections)",
+    y = "Net Sentiment"
+  ) +
+  theme_minimal()
+```
+
+```         
+```
+
+**2.4 Word Clouds and Word Contribution Comparison**
+
+To pinpoint which terms drive positive and negative scoring in The War of the Worlds, I construct a sentiment word cloud and top-word contribution plot.
+
+```{r echo=FALSE}
+# Word Contribution Bar Plot
+tidy_wells %>%
+  filter(str_detect(title, regex("War of the Worlds", ignore_case = TRUE))) %>%
+  inner_join(bing_lex, by = "word") %>%
+  count(word, sentiment, sort = TRUE) %>%
+  group_by(sentiment) %>%
+  slice_max(n, n = 12) %>%
+  ungroup() %>%
+  mutate(word = reorder(word, n)) %>%
+  ggplot(aes(x = n, y = word, fill = sentiment)) +
+  geom_col(show.legend = FALSE) +
+  facet_wrap(~sentiment, scales = "free_y") +
+  labs(
+    title = "Top Sentiment Drivers in 'The War of the Worlds'",
+    x = "Count of Occurrences",
+    y = NULL
+  )
+
+# Comparative Word Cloud
+tidy_wells %>%
+  filter(str_detect(title, regex("War of the Worlds", ignore_case = TRUE))) %>%
+  inner_join(bing_lex, by = "word") %>%
+  count(word, sentiment, sort = TRUE) %>%
+  acast(word ~ sentiment, value.var = "n", fill = 0) %>%
+  comparison.cloud(colors = c("#D95F02", "#1B9E77"), max.words = 100, title.size = 1.5)
+
+```
+
+**2.5 Multidimensional Emotion Breakdown Across Wells' Novels**
+
+Instead of restricting our study to positive vs. negative binary metrics, I measure eight specific emotion categories from the NRC lexicon across all four H.G. Wells works.
+
+```{r echo=FALSE}
+# Map NRC emotions across all 4 novels
+wells_nrc_emotions <- tidy_wells %>%
+  inner_join(get_sentiments("nrc"), by = "word") %>%
+  filter(!sentiment %in% c("positive", "negative")) %>%
+  count(title, sentiment) %>%
+  group_by(title) %>%
+  mutate(proportion = n / sum(n)) %>%
+  ungroup()
+
+ggplot(wells_nrc_emotions, aes(x = reorder(sentiment, proportion), y = proportion, fill = title)) +
+  geom_col(show.legend = FALSE) +
+  facet_wrap(~title, scales = "free_x") +
+  coord_flip() +
+  labs(
+    title = "Proportional Distribution of NRC Emotion Categories in H.G. Wells Novels",
+    x = "Emotion Category",
+    y = "Proportion of Total Emotional Words"
+  )
+
+```
+
+**2.6 Contextual Sentiment Analysis: Identifying Negation Words**
+
+A core limitation of unigram sentiment analysis is negation (e.g., "not good" is classified as positive because of "good"). Here I extract bigrams from The War of the Worlds to quantify how frequently negation words reverse unigram sentiments.
+
+```{r echo=FALSE}
+# Re-tokenize corpus into bigrams
+wells_bigrams <- wells_raw %>%
+  filter(!is.na(text), str_detect(title, regex("War of the Worlds", ignore_case = TRUE))) %>%
+  unnest_tokens(bigram, text, token = "ngrams", n = 2)
+
+# Separate bigrams into two words
+separated_bigrams <- wells_bigrams %>%
+  separate(bigram, c("word1", "word2"), sep = " ")
+
+# List common negation terms
+negation_words <- c("not", "no", "never", "without")
+
+# Find sentiment words preceded by negation terms
+negated_words <- separated_bigrams %>%
+  filter(word1 %in% negation_words) %>%
+  inner_join(get_sentiments("afinn"), by = c("word2" = "word")) %>%
+  count(word1, word2, value, sort = TRUE)
+
+# Plot top negated contribution
+negated_words %>%
+  mutate(contribution = n * value) %>%
+  arrange(desc(abs(contribution))) %>%
+  head(15) %>%
+  mutate(word2 = reorder(word2, contribution)) %>%
+  ggplot(aes(x = contribution, y = word2, fill = contribution > 0)) +
+  geom_col(show.legend = FALSE) +
+  labs(
+    title = "Top Negated Words Influencing Sentiment Scores in 'The War of the Worlds'",
+    subtitle = "Positive values show words preceded by negations that falsely boosted sentiment",
+    x = "Sentiment Score × Frequency (Mistargeted Score)",
+    y = "Words Preceded by Negation ('not', 'no', 'never', 'without')"
+  )
+
+```
+
+## Conclusion
+
+This report successfully reproduced core sentiment analysis workflows from Silge and Robinson (2017) using Jane Austen's novels and extended the methodology to classic science fiction by H.G. Wells.
+
+- **Lexicon Sensitivity & Mismatch:** Unigram-based dictionary approaches (Bing, AFINN, NRC, Loughran-McDonald) reveal stark differences in net sentiment trajectory. Lexicons designed for general or financial domains struggle with genre-specific vocabulary. For instance, formal honorifics like `"miss"` in 19th-century literature miscategorize positive/neutral social interactions as negative, while non-emotional descriptive words like `"like"` falsely boost positive scores in sci-fi narratives.
+
+- **Multidimensional Profiles:** Restricting sentiment analysis to binary metrics (positive vs. negative) masks deeper narrative dynamics. Evaluating multidimensional NRC emotion categories demonstrated that *The War of the Worlds* is predominantly driven by **fear**, **trust**, **sadness**, and **anticipation**.
+
+- **Contextual Breakdown:** Bigram analysis confirms that unigram models frequently miscalculate sentiment due to negation modifiers (e.g., `"not good"`, `"no doubt"`), demonstrating the structural vulnerability of simple word-matching methods.
+
+## Limitations
+
+- **Unigram Negation & Context Loss:** Single-word tokenization fails to account for valence shifters, contrastive conjunctions (e.g., `"but"`), sarcasm, or ironies. Negation analysis reveals substantial score distortions where positive terms preceded by `"not"` or `"no"` artificially inflate positivity.
+
+- **Domain Mismatch & Out-of-Vocabulary Words:** General-purpose lexicons (Bing/NRC) do not account for historical language shifts or genre-specific terminology. Similarly, domain-tailored dictionaries like Loughran-McDonald (built for financial/operational contexts) yield low coverage when applied to literary fiction.
+
+- **Arbitrary Chunking Windows:** Dividing narratives into fixed 80-line sections can obscure precise plot climaxes or artificially average out sudden emotional shifts that occur across chapter breaks.
+
+- **Equal Weighting Fallacy:** Treating all tokens with equal weight ignores differences in semantic intensity across different parts of speech or story positions.
+
+## Recommendations
+
+1.  **Implement Context-Aware Preprocessing:** Before matching tokens against dictionaries, apply custom stop-word lists tailored to period-specific literature (e.g., reclassifying `"miss"` as a neutral honorific rather than a negative verb).
+
+2.  **Shift to N-gram and Sentence-Level Analysis:** Move beyond unigrams to bigrams, trigrams, or dependency parsing to explicitly capture negations (`"not bad"`), intensifiers (`"very happy"`), and structural shifts.
+
+3.  **Utilize Multidimensional Emotion Frameworks:** Prefer multi-class emotion lexicons (such as the 8-category NRC model) over simple binary (positive/negative) metrics when analyzing narrative arcs to capture nuances like anxiety, fear, and anticipation.
+
+4.  **Calibrate Chunking Sizes:** Dynamically adjust section sizes based on natural structural boundaries (e.g., by chapter or paragraph) rather than arbitrary fixed line counts to obtain cleaner narrative arcs.
+
+## Way Forward
+
+- **VADER & Valence Shifter Integration:** Incorporate rule-based algorithms like VADER or R packages like `sentimentr` that automatically account for valence shifters, punctuation intensity, and sentence structure.
+
+- **Transformer-Based Embeddings:** Extend the analysis beyond dictionary lookup methods by implementing transformer models (e.g., BERT, RoBERTa, or fine-tuned LLMs) to capture deep contextual sentiment and subtle nuance in classical literature.
+
+- **Aspect-Based Sentiment Mining:** Apply topic modeling (LDA) prior to sentiment classification to evaluate sentiment towards specific characters, settings, or themes (e.g., sentiment toward the Martians vs. human survivors in *The War of the Worlds*).
+
+- **Cross-Genre Benchmark Dataset:** Develop a standardized, domain-specific sentiment lexicon for 19th-century classical literature and early science fiction to mitigate domain bias.
