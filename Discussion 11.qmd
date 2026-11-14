@@ -1,0 +1,173 @@
+---
+title: "Discussion 11:Reverse Engineering and Scenario Design Analysis of Goodreads' Recommendation Engine"
+author: "Muhammad Imran"
+date: "2026-11-14"
+format: 
+  html:
+    toc: true
+    toc-depth: 3
+    code-fold: show
+    theme: cosmo
+    highlight-style: tango
+execute:
+  warning: false
+  message: false
+---
+
+## 1. Introduction & Objectives
+Recommender systems in digital literature platforms operate under unique cognitive and temporal constraints. Unlike streaming media or music services where consumption occurs in minutes or hours, books demand a multi-day or multi-week time commitment. Consequently, recommendation failures carry a high opportunity cost for the reader. 
+
+This report presents a comprehensive analysis of **Goodreads**, structured around five core components:
+
+1. **Scenario Design Analysis:** Applying Bruce D. Temkin’s 3-question framework from both the **Customer (Reader)** and **Organization (Platform)** perspectives.
+2. **Reverse Engineering:** Deconstructing the platform's underlying architecture, distinguishing between explicit ratings and implicit crowdsourced shelf co-occurrence.
+3. **Computational Modeling & Code:** Implementing an item-to-item collaborative filtering algorithm in R using `tidyverse` principles and cosine similarity.
+4. **Strategic Recommendations:** Proposing concrete UX and algorithmic enhancements.
+5. **Limitations & Future Research:** Critically evaluating data sparsity, popularity bias, and cold-start challenges.
+
+---
+
+## 2. Scenario Design Analysis (Temkin Framework)
+Following Bruce D. Temkin’s methodology, Scenario Design shifts the inquiry from *"What functionality should we offer?"* to *"What user goals should we serve?"* Analyzing this ecosystem from dual perspectives reveals the delicate balance between reader discovery and platform monetization.
+
+### 2.1 Customer Perspective (The Reader)
+* **Target Personas:** 
+  1. *The Avid Bookworm:* Consumes 50+ books annually, tracks granular reading challenges, and actively curates custom shelves.
+  2. *The Casual Browser:* Seeks high-engagement, fast-paced recommendations based on recent media adaptations or seasonal moods.
+* **Core User Goals:** 
+  * Eliminate decision fatigue and avoid "reading slumps."
+  * Discover titles aligned with specific narrative tropes, pacing, and emotional tones.
+  * Maintain an organized digital library ("Read", "Currently-Reading", "To-Read").
+* **Key Scenarios:** Opening the app immediately after finishing an emotionally complex novel to search for a palate-cleanser with similar thematic resonance but lighter prose.
+
+### 2.2 Organization Perspective (Goodreads)
+* **Target Personas:** 
+  1. *Platform Product & Data Teams:* Responsible for maximizing user session length, engagement frequency, and community review generation.
+  2. *Publishing Partners & Authors:* Seeking targeted visibility, pre-release buzz, and review traction.
+* **Core Business Goals:** 
+  * Drive continuous user-generated content (reviews, ratings, custom listopia creation).
+  * Convert book discovery into affiliate retail transactions via direct purchase integrations (Amazon, Barnes & Noble, IndieBound).
+* **Key Scenarios:** Aggregating millions of crowdsourced user shelves nightly to compute large-scale item-to-item similarity graphs without degrading query response times.
+
+---
+
+## 3. Reverse Engineering the Architecture
+Goodreads relies on a **hybrid recommendation architecture** that combines explicit user metadata with implicit community tagging:
+
+1. **Crowdsourced Shelf Co-Occurrence (Graph-Based Mining):** Unlike traditional rating-only systems, Goodreads leverages user-created custom shelves (e.g., `"enemies-to-lovers"`, `"hard-sci-fi"`, `"dark-academia"`). If thousands of users group Book A and Book B onto the same custom shelf, the system establishes a strong semantic edge between them, regardless of star ratings.
+2. **Item-to-Item Collaborative Filtering:** Powering features like *“Readers also enjoyed…”*, the algorithm identifies users with overlapping "Read" libraries and calculates item overlap coefficients.
+3. **Metadata & Librarian Taxonomies:** Combines community-maintained author bibliographies, series relationships, and librarian-assigned genre tags to handle cold-start recommendations for newly published books.
+
+---
+
+## 4. Computational Modeling: Item-to-Item Collaborative Filtering in R
+To demonstrate the mechanics behind Goodreads' recommendation engine, below is a reproducible R implementation using cosine similarity to compute item-to-item recommendations from user-book interactions.
+
+```{r echo=FALSE}
+#| results: asis
+
+# Load required libraries
+library(tidyverse)
+library(proxy)
+
+# 1. Simulate a User-Book Interaction Matrix (Rows = Users, Columns = Books)
+set.seed(42)
+books <- c("The Hobbit", "Dune", "Project Hail Mary", "1984", "Neuromancer", "Hyperion")
+users <- paste0("Reader_", 1:8)
+
+# Generate synthetic rating / shelf presence scores (0 = unread, 1-5 = rated/saved)
+interaction_matrix <- matrix(
+  sample(c(0, 1, 3, 4, 5), length(books) * length(users), replace = TRUE, prob = c(0.4, 0.1, 0.1, 0.2, 0.2)),
+  nrow = length(users),
+  dimnames = list(users, books)
+)
+
+df_ratings <- as.data.frame(interaction_matrix)
+
+cat("\n### Sample User-Book Interaction Matrix\n\n")
+print(knitr::kable(df_ratings))
+
+# 2. Compute Item-to-Item Cosine Similarity Matrix
+item_mat <- t(as.matrix(df_ratings))
+similarity_matrix <- proxy::simil(item_mat, method = "cosine")
+df_sim <- as.data.frame(as.matrix(similarity_matrix))
+
+cat("\n\n### Item-to-Item Cosine Similarity Matrix\n\n")
+print(knitr::kable(round(df_sim, 3)))
+
+# 3. Recommendation Function: Find top N similar books for a target book
+get_recommendations <- function(target_book, sim_df, top_n = 2) {
+  if (!(target_book %in% rownames(sim_df))) {
+    stop("Book not found in library.")
+  }
+  sim_scores <- as.numeric(sim_df[target_book, ])
+  names(sim_scores) <- colnames(sim_df)
+  sorted_scores <- sort(sim_scores, decreasing = TRUE)
+  recommendations <- sorted_scores[names(sorted_scores) != target_book]
+  head(recommendations, top_n)
+}
+
+# Example Recommendation Query
+target <- "Project Hail Mary"
+recs <- get_recommendations(target, df_sim, top_n = 2)
+
+cat(sprintf("\n\n### Top Recommendations for Readers of '%s'\n\n", target))
+rec_table <- tibble(
+  Rank = seq_along(recs),
+  Recommended_Book = names(recs),
+  Cosine_Similarity = round(as.numeric(recs), 3)
+)
+print(knitr::kable(rec_table))
+```
+
+
+
+## 5. Strategic Recommendations for Improvement
+Based on our reverse-engineering analysis, we propose two major technical enhancements for Goodreads:
+
+1. **Granular Pacing and Tone Metadata Classifiers:** Current recommendations rely heavily on broad genres and historical ratings. Implementing Natural Language Processing (NLP) classifiers to tag books by pacing (e.g., *fast-paced*, *slow-burn*) and emotional valence would prevent misaligned recommendations.
+2. **Reading Velocity and DNF (Did Not Finish) Tracking:** Incorporating implicit signals such as completion time or abandonment flags into the collaborative filtering loop would ensure the system stops recommending dense, academic literature to users who consistently stall out on slow-paced titles.
+
+---
+
+## 6. Limitations of the Current Analysis
+While this study successfully reverse-engineers key aspects of Goodreads' recommendation framework, several limitations must be acknowledged:
+
+* **Data Transparency:** Proprietary algorithms and exact weighting parameters used by Goodreads are not publicly disclosed, requiring inference based on academic literature and interface behavior.
+* **Sparsity & Popularity Bias:** Collaborative filtering systems naturally suffer from popularity bias, frequently recommending mainstream bestsellers while failing to surface long-tail, indie publications.
+* **Implicit vs. Explicit Discrepancy:** Placing a book on a "To-Read" shelf is an expression of intent, not endorsement; treating shelf placement identically to a 5-star rating introduces noise into similarity matrices.
+
+---
+
+## 7. Way Forward (Future Research Directions)
+Future work in literary recommender systems should explore:
+
+* **Deep Learning Embeddings:** Integrating transformer-based language models to generate semantic vector embeddings of book synopses and reader review corpora.
+* **Context-Aware Recommendations:** Factoring in real-time contextual variables such as reading format (audiobook vs. physical print) and seasonal reading habits.
+
+---
+
+## 8. Conclusion
+Goodreads successfully harnesses its user base as a distributed metadata curation engine. By pairing crowdsourced custom shelf categorization with robust item-to-item collaborative filtering, the platform delivers scalable book discovery that aligns reader engagement with publisher goals.
+
+---
+
+## 9. References
+
+```{r}
+#| echo: false
+#| results: asis
+
+references_df <- tibble(
+  ID = 1:5,
+  Citation = c(
+    'Linden, G., Smith, B., & York, J. (2003). Amazon.com recommendations: Item-to-item collaborative filtering. *IEEE Internet Computing*, 7(1), 76–80. [View Paper (DOI)](https://doi.org/10.1109/MIC.2003.1167344)',
+    'Temkin, B. D. (2004). *Scenario Design: A Disciplined Approach to Customer Experience*. Forrester Research. [View Summary & Framework](https://www.forrester.com/report/Scenario-Design-A-Disciplined-Approach-To-Customer-Experience/RES34406)',
+    'Ricci, F., Rokach, L., & Shapira, B. (2015). Introduction to recommender systems handbook. In *Recommender Systems Handbook* (pp. 1–35). Springer. [View Chapter (Springer)](https://doi.org/10.1007/978-1-4899-7637-6_1)',
+    'Koren, Y., Bell, R., & Volinsky, C. (2009). Matrix factorization techniques for recommender systems. *IEEE Computer*, 42(8), 30–37. [View Paper (DOI)](https://doi.org/10.1109/MC.2009.263)',
+    'Spangher, A. (2015). *Building the Next New York Times Recommendation Engine*. Open-access engineering technical post, The New York Times. [Read Article (NYT Open)](https://open.nytimes.com/building-the-next-new-york-times-recommendation-engine-194022984905)'
+  )
+)
+
+knitr::kable(references_df, col.names = c("#", "Reference & Active Link"), align = c("c", "l"))
+```
